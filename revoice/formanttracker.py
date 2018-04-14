@@ -37,15 +37,15 @@ class Analyzer:
         self.refFormantFreqList = kwargs.get("refFormantFreqList", formantFreq(np.arange(1, nTrack + 1), 0.15))
         self.deltaFrequencyCost = kwargs.get("deltaFrequencyCost", 1.0)
         self.bandwidthFrequencyCost = kwargs.get("bandwidthFrequencyCost", 1.0)
-        self.octaveTransCost = kwargs.get("octaveTransCost", 0.25)
+        self.octaveTransCost = kwargs.get("octaveTransCost", 0.1)
 
         self.candFrameOffsetList = np.sort(np.asarray(kwargs.get("candOffsetList", np.arange(-16, 17))))
 
     def calcError(self, hFreq, hAmp, F, bw):
         minError = np.inf
-        for bwFac in np.linspace(0.5, 1.5, 33):
+        for bwFac in np.linspace(0.5, 5.0, 17):
             Famp = ipl.interp1d(np.concatenate(((0,), hFreq)), np.concatenate(((hAmp[0],), hAmp)), kind = "linear", bounds_error = False, fill_value = hAmp[-1])(F)
-            vtAmp = calcKlattFilterBankResponseMagnitude(hFreq, F, bw * bwFac, Famp, self.samprate)
+            vtAmp = calcKlattFilterBankResponseMagnitude(hFreq, F, np.clip(bw * bwFac, 50.0, 500.0), Famp, self.samprate)
             if((vtAmp <= 0.0).any()):
                 continue
             err = calcItakuraSaitoDistance(hAmp, vtAmp)

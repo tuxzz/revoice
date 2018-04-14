@@ -3,7 +3,7 @@ from . import yin, pyin, monopitch, mononote, refinef0_if, refinef0_stft
 from . import cheaptrick, mfienvelope, lpcenvelope
 from . import hnm
 from . import lfmodel, rd_krh, lpc
-from . import formanttracker, formant_tkf
+from . import formanttracker, refineformant
 
 __all__ = [
     "common", "sparsehmm", "adaptivestft", "energy", "instantfrequency",
@@ -11,5 +11,5 @@ __all__ = [
     "cheaptrick", "mfienvelope", "lpcenvelope",
     "hnm",
     "lfmodel", "rd_krh", "lpc",
-    "formanttracker", "formant_tkf",
+    "formanttracker", "refineformant"
 ]

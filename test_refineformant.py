@@ -37,18 +37,16 @@ sinusoid = synProc(hFreqList, hAmpList, hPhaseList, sinusoidEnergyList, None, No
 
 w = sp.resample_poly(w, int(np.round(w.shape[0] / sr * 12000.0)), w.shape[0])
 sinusoid = sp.resample_poly(sinusoid, int(np.round(sinusoid.shape[0] / sr * 12000.0)), sinusoid.shape[0])
-lpcSr = 12000.0
+sr = 12000.0
 
 print("LPC Analyzing...")
-lpcProc = lpc.Analyzer(lpcSr, order = order)
+lpcProc = lpc.Analyzer(sr, order = order)
 coeffList, xmsList = lpcProc(sinusoid, f0List)
 
-lpcSpectrum = np.zeros((nHop, 2049))
 FList, bwList = np.zeros((nHop, int(np.ceil(order * 0.5)))), np.zeros((nHop, int(np.ceil(order * 0.5))))
 for iHop, f0 in enumerate(f0List):
-    lpcSpectrum[iHop] = lpc.calcMagnitudeFromLPC(coeffList[iHop], xmsList[iHop], fftSize, lpcSr, deEmphasisFreq = 50.0)
-    F, bw = lpc.calcFormantFromLPC(coeffList[iHop], lpcSr)
-    need = np.logical_and(F > 50.0, F < lpcSr * 0.5)
+    F, bw = lpc.calcFormantFromLPC(coeffList[iHop], sr)
+    need = np.logical_and(F > 50.0, F < sr * 0.5)
     F, bw = F[need], bw[need]
     FList[iHop, :F.shape[0]], bwList[iHop, :F.shape[0]] = F, bw
 
@@ -56,30 +54,40 @@ FList = FList[:, :nMaxFormant]
 bwList = bwList[:, :nMaxFormant]
 
 print("Formant Tracking...")
-formantTracker = formanttracker.Analyzer(nMaxFormant, lpcSr)
-trackedFList, trackedBwList = formantTracker(hFreqList, hAmpList, FList, bwList)
+formantTracker = formanttracker.Analyzer(nMaxFormant, sr)
+FList, bwList = formantTracker(hFreqList, hAmpList, FList, bwList)
 for iFormant in range(nMaxFormant):
     iHop = 0
     splittedF0List = splitArray(f0List)
     for splittedF0 in splittedF0List:
         iEndHop = iHop + splittedF0.shape[0]
         if(splittedF0[0] > 0):
-            trackedFList[iHop:iEndHop, iFormant] = applySmoothingFilter(trackedFList[iHop:iEndHop, iFormant], 9)
+            FList[iHop:iEndHop, iFormant] = applySmoothingFilter(FList[iHop:iEndHop, iFormant], 9)
         else:
-            trackedFList[iHop:iEndHop, iFormant] = 0
+            FList[iHop:iEndHop, iFormant] = 0
         iHop = iEndHop
 
+print("Formant Refinement...")
+formantRefineProcessor = refineformant.Processor(sr)
+FList, bwList, ampList = formantRefineProcessor(hFreqList, hAmpList, FList, bwList)
+
+print("Adaptive STFT...")
+stftAnalyzer = adaptivestft.Analyzer(sr)
+fSigList = stftAnalyzer(sinusoid, f0List)
+magnList = np.abs(fSigList)
+
+'''
 #need = f0List <= 0
 #FList[need] = 0
 #trackedFList[need] = 0
 need = FList <= 0
 FList[need] = np.nan
-need = trackedFList <= 0
-trackedFList[need] = np.nan
+need = FList <= 0
+FList[need] = np.nan
+'''
 
-lpcSpectrum = np.log(np.clip(lpcSpectrum, 1e-6, np.inf))
-tList = np.arange(f0List.shape[0]) * pyinAnalyzer.hopSize / sr
-pl.imshow(lpcSpectrum.T, interpolation = 'bicubic', aspect = 'auto', origin = 'lower', extent = [tList[0], tList[-1], 0, lpcSr / 2])
-pl.plot(tList, FList, 'o')
-pl.plot(tList, trackedFList)
+need = f0List > 0
+iHop = 150
+pl.plot(hFreqList[need][iHop], np.log(hAmpList[need][iHop]))
+pl.plot(rfftFreq(stftAnalyzer.fftSize, sr), np.log(calcKlattFilterBankResponseMagnitude(rfftFreq(stftAnalyzer.fftSize, sr), FList[need][iHop], bwList[need][iHop], ampList[need][iHop], sr)))
 pl.show()

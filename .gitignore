@@ -95,3 +95,4 @@ sin.wav
 sinrs.wav
 synthed.wav
 debug/
+*.cache.pickle
