@@ -15,7 +15,8 @@ Hikaria <hikaria@tuxzz.org>
 * [x] HNM Synther
 * [x] LF-Model
 * [x] Magnitude-only Rd estimator
-* [x] Better HNM analyzer(Done, hnm_get)
+* [x] Better HNM analyzer(hnm_get)
+* [x] Voice Tract Model
 * [ ] SRH F0 estimator
 * [ ] STFChT
 * [ ] STFChT F0 estimator
@@ -28,5 +29,5 @@ Hikaria <hikaria@tuxzz.org>
 * [ ] Fix x axis for test plotting <- Partial finished
 * [ ] Better Documention
 * [x] Formant Tracking
-* [ ] Formant Refinement <- Working
-* [ ] Voice transformation <- Next Step
+* [ ] Formant Refinement
+* [ ] Voice transformation
