@@ -41,7 +41,7 @@ def calcVoiceTractLength(nSection: int, sr: float, c: float = soundVelocity) -> 
   return nSection * c / sr
 
 @nb.jit()
-def calcVoiceTractArea(posList: np.ndarray, radiusList: np.ndarray, sr: float, c: float = soundVelocity) -> np.ndarray:
+def calcVoiceTractRadius(posList: np.ndarray, radiusList: np.ndarray, sr: float, c: float = soundVelocity) -> np.ndarray:
   assert posList.ndim == 1, "input array must be 1d array"
   assert posList.shape == radiusList.shape, "shape of all input arrays must be equal"
   assert posList.shape[0] > 1, "input length must be greater than 1"
@@ -54,7 +54,7 @@ def calcVoiceTractArea(posList: np.ndarray, radiusList: np.ndarray, sr: float, c
   vtLen = posList[-1]
   nSection = calcVoiceTractSectionCount(vtLen, sr, c)
 
-  return ipl.interp1d(posList, radiusList, kind="linear")(np.linspace(0.0, posList[-1], nSection)) ** 2
+  return ipl.interp1d(posList, radiusList, kind="linear")(np.linspace(0.0, posList[-1], nSection))
 
 # Equal Length Tube Model
 @nb.jit()
