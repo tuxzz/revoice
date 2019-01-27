@@ -10,6 +10,7 @@ import numba as nb
 import numbers
 
 eps = 2.2204e-16
+soundVelocity = 340.29 # m/s
 
 windowDict = {
     # name: func(length), main-lobe-width, mean
@@ -334,7 +335,7 @@ def fixComplexIntoUnitCircle(x):
         x[need] = (1 + 0j) / np.conj(x[need])
         return x
 
-def formantFreq(n, L, c = 340.29):
+def formantFreq(n, L, c = soundVelocity):
     """
     Estimate format frequency for given format number based on vocal tract length
 
@@ -357,7 +358,7 @@ def formantFreq(n, L, c = 340.29):
     """
     return (2 * n - 1) * c / 4 / L
 
-def countFormant(freq, L, c = 340.29):
+def countFormant(freq, L, c = soundVelocity):
     """
     Estimate format number for given frequency based on vocal tract length
 
@@ -720,7 +721,7 @@ def calcItakuraSaitoDistance(p, phat):
     float
         Itakura-Saito distance between p and phat
     """
-    assert (phat > 0.0).all()
+    assert (phat > 0.0).all(), "all values in second parameter must be greater than 0"
     r =  p / phat
     return np.log(np.mean(r - np.log(r) - 1))
 
