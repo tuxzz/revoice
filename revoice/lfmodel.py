@@ -82,7 +82,7 @@ def calcInternalParameter(T0, Ee, tp, te, ta):
 @nb.jit(nb.complex128[:](nb.float64[:], nb.float64, nb.float64, nb.float64, nb.float64, nb.float64), nopython = True, cache = True)
 def calcSpectrum(f, T0, Ee, tp, te, ta):
     """
-    Calculate spectrum for given lf model parameters
+    Calculate spectrum form given lf model parameters
 
     Parameters
     ----------
@@ -124,7 +124,7 @@ def calcSpectrum(f, T0, Ee, tp, te, ta):
 @nb.jit(nb.float64[:](nb.float64[:], nb.float64, nb.float64, nb.float64, nb.float64, nb.float64), nopython = True, cache = True)
 def calcFlowDerivative(t, T0, Ee, tp, te, ta):
     """
-    Calculate spectrum for given lf model parameters
+    Calculate flow derivative for given lf model parameters
 
     Parameters
     ----------
@@ -155,3 +155,83 @@ def calcFlowDerivative(t, T0, Ee, tp, te, ta):
     out[o] = E0 * np.exp(a * to) * np.sin(wg * to)
     out[c] = -Ee * (np.exp((te - tc) * e) - np.exp((te - T0) * e)) / (e * ta) # [2] p.18., formula in [1] p.8 is wrong.
     return out
+
+def calcVariantFlowDerivative(nSample, tList, TList, EeList, RdList, sr):
+    # TODO: use antialias lf-model and use a proper window function
+    """
+    Calculate variant flow derivative form given lf model parameters
+
+    Parameters
+    ----------
+    nSample: int
+        Sample count of output
+    tList: array_like
+        List of sample position
+    TList: array_like
+        Fundamental period list at each time point, 1 / f0
+    EeList: array_like
+        Pulse amplitude at each time point
+    RdList: float
+        LF model shape parameter at each time point
+    sr: int
+        Sample rate
+
+    Returns
+    ----------
+    array_like
+        Sample list, shape = (nSample,)
+    """
+    nSample = nSample * 4
+    tList = np.asarray(tList) * 4
+    sr = sr * 4
+
+    tList = np.concatenate(([min(-1, tList[0] - 1)], tList, [max(nSample, tList[-1] + 1)]))
+    TList = np.concatenate(([TList[0]], TList, [TList[-1]]))
+    EeList = np.concatenate(([EeList[0]], EeList, [EeList[-1]]))
+    RdList = np.concatenate(([RdList[0]], RdList, [RdList[-1]]))
+    yList = np.array([TList, EeList, RdList], dtype = np.float64)
+    f = ipl.interp1d(tList, yList, kind="linear", copy = False)
+
+    out = np.zeros(nSample)
+    t = 0
+    while t < nSample:
+        T, Ee, Rd = f(t)
+        dT = int(round(T * sr))
+        t_list = np.linspace(0, T, dT)
+        x = calcFlowDerivative(t_list, T, Ee, *calcParameterFromRd(Rd))
+        ob, oe, ib, ie = getFrameRange(nSample, t, dT)
+        out[ib:ie] = x[ob:oe]
+        t += dT
+    return sp.resample_poly(out, 1, 4)
+
+def calcRdFromTenseness(tenseness):
+    """
+    Calculate Rd from given tenseness
+
+    Parameters
+    ----------
+    tenseness: float
+        In range (0.0, 1.0]
+
+    Returns
+    ----------
+    float
+        Rd
+    """
+    return max(1e-2, min(3 * (1.0 - tenseness), 3.0))
+
+def calcTensenessFromRd(Rd):
+    """
+    Calculate tenseness form given Rd
+
+    Parameters
+    ----------
+    Rd: float
+        In range (0.0, 3.0]
+
+    Returns
+    ----------
+    float
+        tenseness
+    """
+    return max(0.0, min(1 - Rd / 3, 1.0 - 2.99 / 3))
