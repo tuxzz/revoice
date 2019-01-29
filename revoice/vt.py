@@ -59,9 +59,12 @@ def calcVoiceTractRadius(posList: np.ndarray, radiusList: np.ndarray, sr: float,
 # Equal Length Tube Model
 @nb.jit()
 def applyVoiceTractFilterSingleTract(x: np.ndarray, tractAreaList: np.ndarray, glottalReflection: float, lipReflection: float) -> np.ndarray:
-  (nSection,) = tractAreaList.shape
-
   reflection = areaToReflection(tractAreaList)
+  return applyVoiceTractFilterSingleTractByReflection(x, reflection, glottalReflection, lipReflection)
+
+@nb.jit()
+def applyVoiceTractFilterSingleTractByReflection(x: np.ndarray, reflection: np.ndarray, glottalReflection: float, lipReflection: float) -> np.ndarray:
+  (nSection,) = reflection.shape
 
   junctionOutputR = np.zeros(nSection + 1)
   junctionOutputL = np.zeros(nSection + 1)
