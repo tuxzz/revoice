@@ -55,7 +55,7 @@ def calcInternalParameter(T0, Ee, tp, te, ta):
         float, float, float, float, float, float, float
             wg, sinWgTe, cosWgTe, e, A, a, E0
     """
-    assert T0 > 0.0 and Ee > 0.0 and tp > 0.0 and te > 0.0 and ta > 0.0
+    assert T0 > 0.0 and Ee >= 0.0 and tp > 0.0 and te > 0.0 and ta > 0.0
     wg = np.pi / tp #[1](2)
     sinWgTe = np.sin(wg * te)
     cosWgTe = np.cos(wg * te)
