@@ -40,15 +40,15 @@ def loadWav(path):
     """
     samprate, w = wavfile.read(path)
     if(w.dtype == np.int8):
-        w = w.astype(np.float64) / 127.0
+        w = w.astype(np.float32) / 127.0
     elif(w.dtype == np.short):
-        w = w.astype(np.float64) / 32767.0
+        w = w.astype(np.float32) / 32767.0
     elif(w.dtype == np.int32):
-        w = w.astype(np.float64) / 2147483647.0
+        w = w.astype(np.float32) / 2147483647.0
     elif(w.dtype == np.float32):
-        w = w.astype(np.float64)
+        w = w.copy()
     elif(w.dtype == np.float64):
-        pass
+        w = w.astype(np.float32)
     else:
         raise ValueError("Unsupported sample format: %s" % (str(w.dtype)))
     return w, samprate
@@ -105,7 +105,7 @@ def splitArray(seq, cond = lambda v:v <= 0.0 or np.isnan(v)):
         o.append(seq[last:])
     return o
 
-@nb.jit(nb.float64[:](nb.float64[:]), nopython = True, cache = True)
+@nb.jit(nb.float32[:](nb.float32[:]), fastmath=True, nopython=True, cache=True)
 def removeDCSimple(x):
     """
     Simple DC remover based on subtract mean
@@ -159,7 +159,7 @@ def getFrameRange(inputLen, center, size):
 
     return outBegin, outEnd, inputBegin, inputEnd
 
-@nb.jit(nb.float64[:](nb.float64[:], nb.int64, nb.int64), nopython = True, cache = True)
+@nb.jit(nb.float32[:](nb.float32[:], nb.int64, nb.int64), nopython=True, cache=True)
 def getFrame(input, center, size):
     """
     Get a frame from input
@@ -185,10 +185,11 @@ def getFrame(input, center, size):
     out[outBegin:outEnd] = input[inputBegin:inputEnd]
     return out
 
-@nb.jit(nb.int64(nb.int64, nb.float64), nopython = True, cache = True)
+@nb.jit(nb.int64(nb.int64, nb.float64), nopython=True, cache=True)
 def getNFrame(inputSize, hopSize):
     """
     Calculate how many frame you can get
+    inputSize should be less than 2**52 - 1 due to precision of float64
 
     Parameters
     ----------
@@ -202,7 +203,28 @@ def getNFrame(inputSize, hopSize):
     int
         nFrame
     """
-    return int(np.ceil(inputSize / hopSize))
+    return int(round(inputSize / hopSize))
+
+@nb.jit(nb.int64(nb.int64, nb.float64), nopython=True, cache=True)
+def getNSample(nFrame, hopSize):
+    """
+    Calculate how many frame you can get with specified hopSize
+    This function is correct rounded for non-integer hopSize
+    Always use this function instead of calculate by yourself
+
+    Parameters
+    ----------
+    inputSize: int
+        Length of input
+    hopSize: real number
+        Interval size between hops
+    
+    Returns
+    ----------
+    int
+        nFrame
+    """
+    return int(round(nFrame * hopSize))
 
 def getWindow(window):
     """
@@ -270,8 +292,8 @@ def roundUpToPowerOf2(v):
     """
     return int(2 ** np.ceil(np.log2(v)))
 
-@nb.jit(nopython = True, cache = True)
-def parabolicInterpolate(input, i, overAdjust = False):
+@nb.jit(nb.types.Tuple((nb.float32, nb.float32))(nb.float32[:], nb.int64, nb.boolean), nopython=True, cache=True)
+def parabolicInterpolate(input, i, overAdjust):
     """
     Get interpolated peak using parabolic interpolation
 
@@ -309,8 +331,8 @@ def parabolicInterpolate(input, i, overAdjust = False):
         y = a * adjustment * adjustment + b * adjustment + s1
         return (x, y)
     else:
-        x = i
-        return (x, y)
+        i = max(0, min(i, lin - 1))
+        return (i, input[i])
 
 def fixComplexIntoUnitCircle(x):
     """
@@ -381,6 +403,7 @@ def countFormant(freq, L, c = soundVelocity):
     """
     return (freq * 4 * L / c + 1) / 2
 
+@nb.jit(nb.complex64[:](nb.float32[:], nb.float32, nb.float32), fastmath=True, nopython=True, cache=True)
 def getPreEmphasisFilterResponse(x, freq, sr):
     """
     Calculate response for pre-emphasis filter
@@ -400,11 +423,11 @@ def getPreEmphasisFilterResponse(x, freq, sr):
         Filter response for input frequency list
         Complex value
     """
-    x = np.asarray(x)
     a = np.exp(-2.0 * np.pi * freq / sr)
     z = np.exp(2j * np.pi * x / sr)
-    return 1 - a / z
+    return (1 - a / z).astype(np.complex64)
 
+@nb.jit(nb.float32[:](nb.float32[:], nb.float32, nb.float32), fastmath=True, nopython=True, cache=True)
 def applyPreEmphasisFilter(x, freq, sr):
     """
     Apply a 1-order pre-emphasis filter to input signal
@@ -423,12 +446,13 @@ def applyPreEmphasisFilter(x, freq, sr):
     array_like, shape = (n,)
         Processed signal
     """
-    o = np.zeros(len(x))
+    o = np.zeros(len(x), dtype=np.float32)
     fac = np.exp(-2.0 * np.pi * freq / sr)
     o[0] = x[0]
     o[1:] = x[1:] - x[:-1] * fac
     return o
 
+@nb.jit(nb.float32[:](nb.float32[:], nb.float32, nb.float32), fastmath=True, nopython=True, cache=True)
 def applyDeEmphasisFiler(x, freq, sr):
     """
     Apply an inverse filter of pre-emphasis filter to input signal
@@ -454,6 +478,7 @@ def applyDeEmphasisFiler(x, freq, sr):
         o[i] += o[i - 1] * fac
     return o
 
+@nb.njit()
 def lerp(a, b, ratio):
     """
     Linear interpolate between a and b
@@ -513,6 +538,44 @@ def melToFreq(x, a = 2595.0, b = 700.0):
         Linear frequency
     """
     return (np.power(10, x / a) - 1.0) * b
+
+def freqToBark(x):
+    """
+    Convert linear frequency to bark frequency
+
+    Bark = 6 * arcsinh(f / 600)
+    where f is liner frequency
+    
+    Parameters
+    ----------
+    x: float or array_like, shape = (n,)
+        Linear frequency
+
+    Returns
+    ----------
+    float or array_like
+        bark frequency
+    """
+    return 6 * np.arcsinh(x / 600)
+
+def barkToFreq(x):
+    """
+    Convert bark frequency to linear frequency
+    
+    f = 600 * sinh(Bark / 6)
+    where f is liner frequency
+    
+    Parameters
+    ----------
+    x: float or array_like, shape = (n,)
+        Bark frequency
+
+    Returns
+    ----------
+    float or array_like
+        Linear frequency
+    """
+    return 600 * np.sinh(x / 6)
 
 def freqToPitch(freq):
     """
@@ -614,6 +677,7 @@ def lambertW(x):
         w -= v / ((1.0 + w) * u - ((w + 2.0) * v) / (2.0 * w + 2.0))
     return w
 
+@nb.vectorize(fastmath=True)
 def wrap(phase):
     """
     Inverse function of np.unwrap
@@ -626,17 +690,11 @@ def wrap(phase):
     ----------
     number or array_like
     """
-    out = phase - np.round(phase / (2.0 * np.pi)) * 2.0 * np.pi
-    if(isinstance(phase, numbers.Number)):
-        if(out > np.pi):
-            out -= 2 * np.pi
-        elif(out < np.pi):
-            out += 2 * np.pi
-    else:
-        phase = np.asarray(phase)
-        out[out > np.pi] -= 2 * np.pi
-        out[out < -np.pi] += 2 * np.pi
-
+    out = phase - round(phase / (2.0 * np.pi)) * 2.0 * np.pi
+    if(out > np.pi):
+        out -= 2 * np.pi
+    elif(out < np.pi):
+        out += 2 * np.pi
     return out
 
 def findPeak(x, lowerIdx, upperIdx):
@@ -704,7 +762,7 @@ def calcSinusoidMinphase(hFreq, hAmp):
     out = ipl.interp1d(np.arange(nBin), phase, kind = "linear", bounds_error = True)(x[1:-1])
     return np.concatenate((out, (out[-1],)))
 
-@nb.jit(nb.float64(nb.float64[:], nb.float64[:]), nopython = True, cache = True)
+@nb.jit(nb.float32(nb.float32[:], nb.float32[:]), fastmath=True, nopython = True, cache = True)
 def calcItakuraSaitoDistance(p, phat):
     """
     Calculate Itakura-Saito distance between p and phat
@@ -725,23 +783,27 @@ def calcItakuraSaitoDistance(p, phat):
     r =  p / phat
     return np.log(np.mean(r - np.log(r) - 1))
 
+@nb.njit(fastmath=True)
 def shiftPhase(shiftRatio, origPhase, theta):
     return wrap(origPhase + shiftRatio * theta)
 
+@nb.njit(parallel=True, fastmath=True)
 def propagatePhase(hFreqList, hPhaseList, hopSize, sr, inversed):
+    (nHop, _) = hFreqList.shape
     f0List = hFreqList[:, 0].copy()
     f0List[f0List < 0.0] = 0.0
-    dList = np.cumsum(f0List) * (hopSize / sr * 2 * np.pi)
+    dList = np.cumsum(f0List) * (hopSize / sr * 2.0 * np.pi)
     o = hPhaseList.copy()
-    for iHop, d in enumerate(dList):
-        if(f0List[iHop] <= 0):
+    for iHop in nb.prange(nHop):
+        if f0List[iHop] <= 0:
             continue
-        if(inversed):
+        d = dList[iHop]
+        if inversed:
             d = -d
         o[iHop] = shiftPhase(hFreqList[iHop] / hFreqList[iHop][0], o[iHop], d)
     return o
 
-@nb.jit(nb.complex128[:](nb.float64[:], nb.float64[:], nb.float64), nopython = True, cache = True)
+@nb.jit(nb.complex64[:](nb.float32[:], nb.float32[:], nb.float32), fastmath=True, nopython = True, cache = True)
 def calcSpectrumAtFreq(x, freqList, sr):
     """
     Calculate specturm of x at specific frequency
@@ -766,7 +828,7 @@ def calcSpectrumAtFreq(x, freqList, sr):
     nFreq = freqList.shape[0]
     
     t = np.arange(-nX // 2, nX // 2) / sr
-    o = np.zeros(nFreq, dtype = np.complex128)
+    o = np.zeros(nFreq, dtype = np.complex64)
     n2jpit = -2j * np.pi * t
     for i, freq in enumerate(freqList):
         o[i] = np.sum(x * np.exp(n2jpit * freq))
@@ -783,9 +845,9 @@ def minimizeScalar(costFunction, gridSearchPointList, args = ()):
     iBest = 0
     bestLoss = np.inf
 
-    if(nGridSearchPoint == 2):
+    if nGridSearchPoint == 2:
         return so.minimize_scalar(costFunction, args = args, method = "Bounded", bounds = gridSearchPointList).x
-    elif(nGridSearchPoint == 0):
+    elif nGridSearchPoint == 0:
         return so.minimize_scalar(costFunction, args = args, method = "Brent").x
     else:
         # firstly perform grid search to prevent fall into local minima
@@ -804,32 +866,32 @@ def minimizeScalar(costFunction, gridSearchPointList, args = ()):
             bounds = (gridSearchPointList[i - 1], gridSearchPointList[i + 1])
         return so.minimize_scalar(costFunction, args = args, method = "Bounded", bounds = bounds).x
 
-@nb.jit(nb.complex128[:](nb.complex128[:], nb.float64, nb.float64), nopython = True, cache = True)
+@nb.jit(nb.complex64[:](nb.complex64[:], nb.float32, nb.float32), fastmath=True, nopython=True, cache=True)
 def calcKlattFilterTransfer(z, bw, amp):
     C = -np.exp(2.0 * np.pi * bw)
     B = -2 * np.exp(np.pi * bw)
     A = 1 - B - C
     ampFac = (1.0 + B - C) / A * amp
-    return A / (1.0 - B / z - C / (z * z)) * ampFac
+    return (A / (1.0 - B / z - C / (z * z)) * ampFac).astype(np.complex64)
 
-@nb.jit(nb.complex128[:](nb.float64[:], nb.float64, nb.float64, nb.float64, nb.float64), nopython = True, cache = True)
+@nb.jit(nb.complex64[:](nb.float32[:], nb.float32, nb.float32, nb.float32, nb.float32), fastmath=True, nopython=True, cache=True)
 def calcKlattFilterResponse(freqList, F, bw, amp, sr):
-    z = np.exp(2.0j * np.pi * (0.5 + (freqList - F) / sr))
+    z = np.exp(2.0j * np.pi * (0.5 + (freqList - F) / sr)).astype(np.complex64)
     return calcKlattFilterTransfer(z, bw / sr, amp)
 
-@nb.jit(nb.float64[:](nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64), nopython = True, cache = True)
+@nb.jit(nb.float32[:](nb.float32[:], nb.float32[:], nb.float32[:], nb.float32[:], nb.float32), fastmath=True, nopython=True, cache=True)
 def calcKlattFilterBankResponseMagnitude(freqList, FList, bwList, ampList, sr):
     nFilter = FList.shape[0]
     assert bwList.shape[0] == ampList.shape[0]
     assert bwList.shape[0] == nFilter
 
-    out = np.zeros(freqList.shape)
+    out = np.zeros(freqList.shape, dtype=np.float32)
     for iFilter in range(nFilter):
         F, bw, amp = FList[iFilter], bwList[iFilter], ampList[iFilter]
         out += np.abs(calcKlattFilterResponse(freqList, F, bw, amp, sr))
     return out
 
-@nb.jit(nb.int64(nb.int64, nb.int64), nopython = True, cache = True)
+@nb.jit(nb.int64(nb.int64, nb.int64), nopython=True, cache=True)
 def calcCombination(n, r):
     result = 1.0
     if(r > n // 2):
@@ -881,3 +943,63 @@ def applySmoothingFilter(x, order):
         out[i] = mean + (nPos - nNeg) * dTotal / (order * order)
     
     return out
+
+@nb.jit(nb.float32[:](nb.int64, nb.float32), fastmath=True, nopython=True, cache=True)
+def gaussian(M, std):
+    n = np.arange(0, M) - (M - 1.0) / 2.0
+    sig2 = 2 * std * std
+    w = np.exp(-n ** 2 / sig2)
+    return w.astype(np.float32)
+
+@nb.jit(nb.float32[:](nb.int64), fastmath=True, nopython = True, cache=True)
+def blackman(M):
+    assert M > 1, "window length must be greater than 1"
+    n = np.arange(0, M)
+    return (0.42 - 0.5*np.cos(2.0*np.pi*n/(M-1)) + 0.08*np.cos(4.0*np.pi*n/(M-1))).astype(np.float32)
+
+@nb.jit(nb.float32[:](nb.int64), fastmath=True, nopython=True, cache=True)
+def blackmanharris(M):
+    assert M > 1, "window length must be greater than 1"
+    n = np.arange(0, M)
+    fac = n * 2 * np.pi / (M - 1.0)
+    w = (0.35875 - 0.48829 * np.cos(fac) + 0.14128 * np.cos(2 * fac) - 0.01168 * np.cos(3 * fac))
+    return w.astype(np.float32)
+
+def fmin_scalar(f, bound_list, max_iter):
+    (x_left, x_right) = bound_list
+    (f_left, f_right) = (f(x_left), f(x_right))
+    for _ in range(max_iter):
+        if x_left == x_right:
+            break
+        x_mid = (x_left + x_right) / 2
+        f_mid = f(x_mid)
+        if f_left < f_right:
+            (x_right, f_right) = (x_mid, f_mid)
+        else:
+            (x_left, f_left) = (x_mid, f_mid)
+    return x_left if f_left < f_right else x_right
+
+def dc_iir_filter(cutoff):
+    a1 = -2.0 * np.cos(np.pi * cutoff)
+    a0 = 8.0 * np.cos(np.pi * cutoff) - 7.0
+    r = (-a1 - np.sqrt(a1 ** 2 - 4.0 * a0)) / 2.0
+    a = np.array([1.0, -r], dtype=np.float32)
+    b = np.array([1.0, -1.0], dtype=np.float32)
+    return b, a
+
+@nb.njit(fastmath=True)
+def fdHann(f):
+    # integral from 0 to 1 (sin^2[x * PI] * Exp[-2 * PI * I * x * f]) dx
+    out = np.full_like(f, 0.5, dtype=np.complex64)
+    out[f == 1.0] = -0.25
+    need = (f != 0.0) & (f != 1.0)
+    wf = f[need]
+    out[need] = -(1j - 1j * np.exp(-2j * np.pi * wf)) / (4 * np.pi * (wf - wf ** 3))
+    return out
+
+def accurateHann(width, offsetWidth, fftSize):
+    f = np.fft.rfftfreq(fftSize, 1 / width)
+    fd = fdHann(f)
+    if offsetWidth != 0.0:
+        fd *= np.exp(-2j * offsetWidth * np.pi * f)
+    return np.fft.irfft(fd) * width
