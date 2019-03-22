@@ -57,11 +57,12 @@ def x2as(x, h, ws):
   (nx,) = x.shape
   nw_2 = nw // 2
 
-  y1 = sp.fftconvolve(x, h)[nw_2:-nw_2 + 1]
+  y1 = sp.fftconvolve(x, h, mode="full")[nw_2:-nw_2 + 1] # not equal to "same"
+  y1 = y1
   y1 /= np.abs(y1) + 1e-8
-  y2 = sp.fftconvolve(y1, h)[nw_2:-nw_2 + 1]
+  y2 = sp.fftconvolve(y1, h, mode="full")[nw_2:-nw_2 + 1]
 
-  r = y1 - y2
+  # r = y1 - y2
   y1 -= y2
   r = y1
   del y1, y2
@@ -69,12 +70,61 @@ def x2as(x, h, ws):
   del r
   a *= a
   
-  s = sp.fftconvolve(a, ws)[nw_2:-nw_2 + 1]
+  s = sp.fftconvolve(a, ws, mode="full")[nw_2:-nw_2 + 1]
   del a, ws
   s[:nw] = s[nw - 1]
   s[-nw:] = s[-nw]
   return s
 
+
+def x2as_sf(x, h, ws):
+  (nw,) = h.shape
+  (nx,) = x.shape
+  nw_2 = nw // 2
+
+  y1 = sp.fftconvolve(x, h, mode="full")[nw:-nw + 2]
+  y1 /= np.abs(y1) + 1e-8
+  y2 = sp.fftconvolve(y1, h, mode="full")[nw:-nw + 2]
+  
+  r = y1[nw_2:-nw_2 + 1] - y2
+  del y1, y2
+  a = np.abs(r, dtype=np.float32)
+  del r
+  a *= a
+  
+  s = sp.fftconvolve(a, ws, mode="full")[nw:-nw + 2]
+  del a, ws
+  assert s.size == 1, "Bad assumption"
+  return s[0]
+
+def x2as_sf_fast(x, h, ws):
+  (nw,) = h.shape
+  (nx,) = x.shape
+
+  y1 = np.zeros(nx + nw - 1, dtype=np.complex64)
+  
+  accelerator.segconvRealCplxSt(x, h, y1)
+  y1 = y1[nw:-nw + 2]
+  y1 /= np.abs(y1) + 1e-8
+
+  y2 = np.zeros(y1.size + nw - 1, dtype=np.complex64)
+  accelerator.segconvCplxSt(y1, h, y2)
+  y2 = y2[nw:-nw + 2]
+  
+  r = y1[nw // 2:-nw // 2 + 1] - y2
+  del y1, y2
+  a = np.abs(r, dtype=np.float32)
+  del r
+  a *= a
+  
+  s = np.zeros(a.size + nw - 1, dtype=np.float32)
+  accelerator.segconvSt(a, ws, s)
+  s = s[nw:-nw + 2]
+  del a, ws
+  assert s.size == 1, "Bad assumption"
+  return s[0]
+
+@nb.njit()
 def createYangSNRParameter(bw):
   nw = int(np.ceil(4.0 / bw))
   if nw % 2 != 0:
@@ -88,6 +138,17 @@ def createYangSNRParameter(bw):
   w /= np.sum(w)
   return w
 
+def calcYangSNRSingleFrame(x, f, w):
+  (nw,) = w.shape
+  assert nw % 2 == 0
+  (nx,) = x.shape
+  assert nx == 1 + (nw - 1) * 3
+  nw_2 = nw // 2.0
+
+  omegah = 2 * np.pi * f
+  h = w * np.exp(1j * omegah * (np.arange(0, nw).astype(np.float32) - nw_2))
+  return x2as_sf_fast(x, h, w)
+
 def calcYangSNR(x, f, w, mt=True):
   (nw,) = w.shape
   assert nw % 2 == 0
@@ -97,6 +158,7 @@ def calcYangSNR(x, f, w, mt=True):
   h = w * np.exp(1j * omegah * (np.arange(0, nw).astype(np.float32) - nw_2))
   return x2as_fast(x, h, w, mt)
 
+@nb.njit(fastmath=True)
 def createYangIFParameter(f, bw):
   nh = int(np.ceil(4.0 / bw))
   if nh % 2 != 0:
