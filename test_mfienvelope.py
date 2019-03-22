@@ -25,7 +25,9 @@ magnList = np.abs(fSigList)
 print("MFI Envelope...")
 envAnalyzer = mfienvelope.Analyzer(sr)
 envList = envAnalyzer(w, f0List)
+assert envList.dtype == np.float32
 
+print("Plotting...")
 t = w.shape[0] / sr
 tx = (np.arange(f0List.shape[0]) + 0.5) * pyinAnalyzer.hopSize / sr
 pl.imshow(envList.T, interpolation = 'bicubic', aspect = 'auto', origin = 'lower', extent = [tx[0], tx[-1], 0, sr / 2])

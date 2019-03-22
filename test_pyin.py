@@ -9,11 +9,15 @@ print("Direct...")
 pyinAnalyzer = pyin.Analyzer(sr, prefilter = False)
 obsProbList = pyinAnalyzer(w)
 f0List = pyin.extractF0(obsProbList)
+assert obsProbList.dtype == np.float32
+assert f0List.dtype == np.float32
 
 print("Prefiltered...")
 pyinAnalyzer = pyin.Analyzer(sr)
 obsProbList = pyinAnalyzer(w)
 f0List_pf = pyin.extractF0(obsProbList)
+assert obsProbList.dtype == np.float32
+assert f0List_pf.dtype == np.float32
 
 pl.plot(np.arange(w.shape[0]) / sr, w * 100)
 tList = np.arange(f0List.shape[0]) * pyinAnalyzer.hopSize / sr

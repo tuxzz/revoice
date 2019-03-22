@@ -13,8 +13,8 @@ def calcFormantFromLPC(coeff, sr):
     roots = fixComplexIntoUnitCircle(roots)
     
     nFormant = roots.shape[0]
-    F = np.zeros(nFormant)
-    bw = np.zeros(nFormant)
+    F = np.zeros(nFormant, dtype=np.float32)
+    bw = np.zeros(nFormant, dtype=np.float32)
 
     for iRoot in range(nFormant):
         freq = np.abs(np.arctan2(roots.imag[iRoot], roots.real[iRoot])) * nyq / np.pi
@@ -34,7 +34,7 @@ def calcMagnitudeFromLPC(coeff, xms, fftSize, sr, deEmphasisFreq = None, bandwid
     scale = 1.0 / np.sqrt(2.0 * nyq * nyq / (fftSize / 2.0))
 
     # copy to buffer
-    fftBuffer = np.zeros(fftSize)
+    fftBuffer = np.zeros(fftSize, dtype=np.float32)
     fftBuffer[0] = 1.0
     fftBuffer[1:nData] = coeff
 
@@ -51,7 +51,7 @@ def calcMagnitudeFromLPC(coeff, xms, fftSize, sr, deEmphasisFreq = None, bandwid
         fftBuffer[1:nData] *= np.power(fac, np.arange(2, nData + 1))
 
     # do fft
-    if(xms > 0.0):
+    if xms > 0.0:
         scale *= np.sqrt(xms)
     o = np.fft.rfft(fftBuffer)
     o.real[0] = scale / o.real[0]
@@ -60,16 +60,17 @@ def calcMagnitudeFromLPC(coeff, xms, fftSize, sr, deEmphasisFreq = None, bandwid
     o.real[-1] = scale / o.real[-1]
     o.imag[-1] = 0.0
 
-    return np.abs(o)
+    return np.abs(o, dtype=np.float32)
 
+@nb.jit(nb.types.Tuple((nb.float32[:], nb.float32))(nb.float32[:], nb.int64), fastmath=True, nopython=True, cache=True)
 def burgSingleFrame(x, order):
     n = x.shape[0]
     m = order
 
-    a = np.ones(m)
-    aa = np.ones(m)
-    b1 = np.ones(n)
-    b2 = np.ones(n)
+    a = np.ones(m, dtype=np.float32)
+    aa = np.ones(m, dtype=np.float32)
+    b1 = np.ones(n, dtype=np.float32)
+    b2 = np.ones(n, dtype=np.float32)
     # (3)
     xms = np.sum(x * x) / n
     assert xms > 0
@@ -110,7 +111,7 @@ def autocorrelationSingleFrame(x, order):
     nx = np.min((m + 1, n))
     r = np.fft.irfft(np.abs(np.fft.rfft(x, n = nFFT) ** 2))
     r = r[:nx] / n
-    a, e, k = levinson1d(r, m)
+    a, _, _ = levinson1d(r, m)
     gain = np.sqrt(np.sum(a * r * n))
 
     return a[1:], gain
@@ -128,22 +129,23 @@ def slowAutocorrelationSingleFrame(x, order):
     gain = np.sqrt(r[0] + np.sum(a * r[1:]))
     return a, gain
 
+@nb.jit(nb.types.Tuple((nb.complex64[:], nb.float32, nb.complex64[:]))(nb.complex64[:], nb.int64), fastmath=True, nopython=True, cache=True)
 def levinson1d(r, order):
     (n,) = r.shape
     assert n > 0, "r cannot be an empty array"
     assert order < n, "Order must be less than size"
-    assert np.isreal(r[0]), "First item of r must be real"
+    assert r[0].imag == 0.0, "First item of r must be real"
     assert r[0] != 0, "First item of r cannot be zero"
 
     # Estimated coefficients
-    a = np.empty(order + 1, r.dtype)
+    a = np.empty(order + 1, dtype=np.complex64)
     # temporary array
-    t = np.empty(order + 1, r.dtype)
+    t = np.empty(order + 1, dtype=np.complex64)
     # Reflection coefficients
-    k = np.empty(order, r.dtype)
+    k = np.empty(order, dtype=np.complex64)
 
     a[0] = 1.0
-    e = r[0]
+    e = r[0].real
 
     for i in range(1, order + 1):
         acc = r[i]
@@ -157,7 +159,7 @@ def levinson1d(r, order):
             a[j] += k[i-1] * np.conj(t[i-j])
         e *= 1 - k[i-1] * np.conj(k[i-1])
 
-    return a, e, k
+    return a, e.real, k
 
 class Analyzer:
     supportedLPCAnalyzer = {
@@ -182,22 +184,21 @@ class Analyzer:
 
         assert getNFrame(nX, self.hopSize) == nHop
 
-        coeffList = np.zeros((nHop, self.order))
-        xmsList = np.zeros(nHop)
+        coeffList = np.zeros((nHop, self.order), dtype=np.float32)
+        xmsList = np.zeros(nHop, dtype=np.float32)
         for iHop, f0 in enumerate(f0List):
-            if(not enableUnvoiced and f0 <= 0.0):
+            if not enableUnvoiced and f0 <= 0.0:
                 continue
             iCenter = int(round(iHop * self.hopSize))
 
             windowSize = int((self.samprate / f0 * 4.0 if(f0 > 0.0) else self.hopSize * 6) * self.windowFac)
-            if(windowSize % 2 == 0):
+            if windowSize % 2 == 0:
                 windowSize += 1
-            
             frame = getFrame(x, iCenter, windowSize)
-            if(self.removeDC):
+            if self.removeDC:
                 frame = removeDCSimple(frame)
 
-            if(np.mean(frame ** 2) < self.energyThreshold):
+            if np.mean(frame ** 2) < self.energyThreshold:
                 continue
             coeffList[iHop], xmsList[iHop] = lpcAnalysisSingleFrame(frame, self.order)
 

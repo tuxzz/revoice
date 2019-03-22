@@ -28,15 +28,18 @@ f0List = f0RefineProcessor(w, f0List)
 print("HNM Analyzing...")
 hnmAnalyzer = hnm.Analyzer(sr, harmonicAnalysisMethod = "qfft")
 hFreqList, hAmpList, hPhaseList, sinusoidEnergyList, noiseEnvList, noiseEnergyList = hnmAnalyzer(w, f0List)
+assert hFreqList.dtype == hAmpList.dtype == hPhaseList.dtype == sinusoidEnergyList.dtype == noiseEnvList.dtype == noiseEnergyList.dtype == np.float32
 
 print("Sinusoid Synthing...")
 synProc = hnm.Synther(sr)
 sinusoid = synProc(hFreqList, hAmpList, hPhaseList, sinusoidEnergyList, None, None, enableNoise = False)
-srer = calcSRER(w, sinusoid)
+srer = calcSRER(w[:min(w.shape[0], sinusoid.shape[0])], sinusoid[:min(w.shape[0], sinusoid.shape[0])])
+assert sinusoid.dtype == np.float32
 
 print("HNM Synthing...")
 synProc = hnm.Synther(sr)
 synthed = synProc(hFreqList, hAmpList, hPhaseList, sinusoidEnergyList, noiseEnvList, noiseEnergyList)
+assert synthed.dtype == np.float32
 
 print("Average SRER = %lf" % srer)
 tList = np.arange(f0List.shape[0]) * pyinAnalyzer.hopSize / sr
@@ -47,5 +50,5 @@ pl.figure()
 pl.plot(tList, sinusoidEnergyList)
 pl.plot(tList, noiseEnergyList)
 pl.figure()
-pl.plot(np.arange(w.shape[0]) / sr, synthed)
+pl.plot(np.arange(synthed.shape[0]) / sr, synthed)
 pl.show()

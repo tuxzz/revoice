@@ -32,11 +32,11 @@ class Analyzer:
         del fSigList
 
         # find quasi-harmonic
-        hFreqList = np.zeros((nHop, maxHar), dtype = np.float64)
-        hAmpList = np.zeros((nHop, maxHar), dtype = np.float64)
-        hPhaseList = np.zeros((nHop, maxHar), dtype = np.float64)
+        hFreqList = np.zeros((nHop, maxHar), dtype=np.float32)
+        hAmpList = np.zeros((nHop, maxHar), dtype=np.float32)
+        hPhaseList = np.zeros((nHop, maxHar), dtype=np.float32)
         for iHop, f0 in enumerate(f0List):
-            if(f0 <= 0.0):
+            if f0 <= 0.0:
                 continue
             hFreqList[iHop], hAmpList[iHop], hPhaseList[iHop] = self._findHarmonic(f0, magnList[iHop], phaseList[iHop], maxHar)
         hAmpList = np.exp(hAmpList)
@@ -50,9 +50,9 @@ class Analyzer:
         assert magn.shape == phase.shape
         assert f0 > 0.0
 
-        hFreq = np.zeros(maxHar, dtype = np.float64)
-        hAmp = np.full(maxHar, -np.inf, dtype = np.float64)
-        hPhase = np.zeros(maxHar, dtype = np.float64)
+        hFreq = np.zeros(maxHar, dtype=np.float32)
+        hAmp = np.full(maxHar, -np.inf, dtype=np.float32)
+        hPhase = np.zeros(maxHar, dtype=np.float32)
 
         nHar = min(maxHar, int(self.mvf / f0))
         offset = f0 * self.maxHarmonicOffset
@@ -63,7 +63,7 @@ class Analyzer:
             lowerIdx = max(0, int(np.floor((freq - offset) / self.samprate * self.fftSize)))
             upperIdx = min(nBin - 1, int(np.ceil((freq + offset) / self.samprate * self.fftSize)))
             peakBin = findPeak(magn, lowerIdx, upperIdx)
-            ipledPeakBin, ipledPeakAmp = parabolicInterpolate(magn, peakBin)
+            ipledPeakBin, ipledPeakAmp = parabolicInterpolate(magn, peakBin, False)
             hFreq[iHar - 1] = freq if(self.strictHarmonic) else ipledPeakBin * self.samprate / self.fftSize
             hAmp[iHar - 1] = ipledPeakAmp
             hPhase[iHar - 1] = lerp(phase[peakBin], phase[peakBin + 1], ipledPeakBin - np.floor(ipledPeakBin))

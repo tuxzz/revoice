@@ -17,6 +17,7 @@ f0List[silentList] = -np.abs(f0List[silentList])
 print("F0 Refinement...")
 f0RefineProcessor = refinef0_stft.Processor(sr)
 f0List_rf = f0RefineProcessor(w, f0List)
+assert f0List_rf.dtype == np.float32
 
 pl.plot(np.arange(w.shape[0]) / sr, w * 100)
 tList = np.arange(f0List.shape[0]) * pyinAnalyzer.hopSize / sr

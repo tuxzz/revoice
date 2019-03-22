@@ -17,7 +17,7 @@ def calcCheapTrick(x, f0, sr, order):
     c[nX:] = c[1:nX - 1][::-1]
     smoothed = np.fft.rfft(c).real
 
-    return smoothed
+    return smoothed.astype(np.float32)
 
 class Analyzer:
     def __init__(self, sr, **kwargs):
@@ -36,7 +36,7 @@ class Analyzer:
 
         # check input
         assert nHop == f0List.shape[0]
-        out = np.zeros(magnList.shape)
+        out = np.zeros(magnList.shape, dtype=np.float32)
         for iHop, f0 in enumerate(f0List):
             if(f0 <= 0.0):
                 f0 = self.fixedF0

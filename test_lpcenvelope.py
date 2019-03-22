@@ -25,6 +25,7 @@ magnList = np.abs(fSigList)
 print("LPC...")
 envAnalyzer = lpcenvelope.Analyzer(sr)
 envList = envAnalyzer(w, f0List)
+assert envList.dtype == np.float32
 
 t = w.shape[0] / sr
 tx = (np.arange(f0List.shape[0]) + 0.5) * pyinAnalyzer.hopSize / sr

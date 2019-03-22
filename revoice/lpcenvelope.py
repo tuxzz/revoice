@@ -8,7 +8,7 @@ from . import lpc
 class Analyzer:
     def __init__(self, sr, **kwargs):
         defaultOrder = int(np.ceil(sr / 12000 * 13))
-        if(defaultOrder % 2 == 0):
+        if defaultOrder % 2 == 0:
             defaultOrder += 1
         
         self.samprate = float(sr)
@@ -24,15 +24,15 @@ class Analyzer:
         (nHop,) = f0List.shape
         (nX,) = x.shape
         assert getNFrame(nX, self.hopSize) == nHop
-
-        if(self.preemphasisFreq):
+        
+        if self.preemphasisFreq:
             x = applyPreEmphasisFilter(x, self.preemphasisFreq, self.samprate)
 
         lpcProc = lpc.Analyzer(self.samprate, lpcAnalysisMethod = self.lpcAnalysisMethod)
         coeffList, xmsList = lpcProc(x, f0List, self.order)
 
-        lpcSpectrum = np.zeros((nHop, nBin))
+        lpcSpectrum = np.zeros((nHop, nBin), dtype=np.float32)
         for iHop in range(nHop):
-            lpcSpectrum[iHop] = lpc.calcMagnitudeFromLPC(coeffList[iHop], xmsList[iHop], self.fftSize, self.samprate, deEmphasisFreq = self.preemphasisFreq)
+            lpcSpectrum[iHop] = lpc.calcMagnitudeFromLPC(coeffList[iHop], xmsList[iHop], self.fftSize, self.samprate, deEmphasisFreq=self.preemphasisFreq)
         
         return np.log(np.clip(lpcSpectrum, eps, np.inf))

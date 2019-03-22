@@ -2,8 +2,9 @@ from .common import *
 from . import lfmodel
 
 # Kanru Hua's magnitude-based Rd estimator
-# [1] http://khua5.web.engr.illinois.edu/writings/hua-spcc-poster.pdf
+# [1] https://github.com/Sleepwalking/prometheus-spark/blob/master/writings/pseudo-glottal-inverse-filter-hua-2016.pdf
 
+@nb.jit(nb.float32(nb.float32, nb.float32[:], nb.float32[:]), fastmath=True, nopython=True, cache=True)
 def costFunction(rd, hFreq, hEnergy):
     lfSpec = lfmodel.calcSpectrum(hFreq, 1.0 / hFreq[0], 1, *lfmodel.calcParameterFromRd(rd))
 

@@ -3,6 +3,45 @@ import scipy.signal as sp
 
 from .common import *
 
+def _mfiCore(x, f0List, kernel, trans, fixedF0, hopSize, sr, windowLengthFac, fftSize, out):
+    nBin = fftSize // 2 + 1
+    (halfKernelSize,) = trans.shape
+    revTrans = trans[::-1]
+    for iHop, f0 in enumerate(f0List):
+        if f0 <= 0.0:
+            f0 = fixedF0
+        # generate window
+        iCenter = int(round(iHop * hopSize))
+        offsetRadius = int(np.ceil(sr / (2 * f0)))
+        stdev = sr / (3 * f0)
+        windowSize = min(int(2 * sr / f0 * windowLengthFac), fftSize)
+        if(windowSize % 2 != 0):
+            windowSize += 1
+        window = gaussian(windowSize, stdev)
+        window *= 2 / np.sum(window)
+
+        # calc average(integrated) magn
+        integratedMagn = np.zeros(nBin)
+        for offset in range(-offsetRadius, offsetRadius):
+            frame = removeDCSimple(getFrame(x, iCenter + offset, windowSize)) * window
+            integratedMagn += np.abs(np.fft.rfft(frame, n = fftSize))
+        integratedMagn /= 2 * offsetRadius
+        integratedEnergy = np.sum(integratedMagn ** 2)
+        if(integratedEnergy < 1e-16):
+            out[iHop] = 1e-6
+            continue
+        
+        # filter average magn on log domain
+        integratedMagn = np.log(np.clip(integratedMagn, 1e-6, np.inf))
+        smoothedMagn = np.convolve(integratedMagn, kernel)[halfKernelSize:-halfKernelSize]
+        # make bounds better
+        smoothedMagn[:halfKernelSize] = integratedMagn[:halfKernelSize] + (smoothedMagn[:halfKernelSize] - integratedMagn[:halfKernelSize]) * trans
+        smoothedMagn[-halfKernelSize:] = integratedMagn[-halfKernelSize:] + (smoothedMagn[-halfKernelSize:] - integratedMagn[-halfKernelSize:]) * revTrans
+        # normalize filtered magn and output
+        smoothedMagn += np.log(np.sqrt(integratedEnergy / np.sum(np.exp(smoothedMagn) ** 2)))
+        out[iHop] = smoothedMagn
+    return out
+
 class Analyzer:
     def __init__(self, sr, **kwargs):
         self.samprate = float(sr)
@@ -14,6 +53,7 @@ class Analyzer:
         self.filterTransExp = kwargs.get("filterTransExp", 8)
         self.windowLengthFac = kwargs.get("windowLengthFac", 1.0)
         self.fixedF0 = kwargs.get("fixedF0", 220.0)
+        self.useAccelerator = kwargs.get("useAccelerator", True)
 
     def __call__(self, x, f0List):
         # constant
@@ -27,44 +67,16 @@ class Analyzer:
         assert self.fftSize % 2 == 0
 
         # do calculate
-        out = np.zeros((nHop, nBin))
-        kernel = sp.firwin(self.filterKernelSize, self.filterCutoff, window = "hanning", pass_zero = True)
-        trans = (np.arange(halfKernelSize) / (halfKernelSize - 1)) ** self.filterTransExp
-        revTrans = trans[::-1]
-        for iHop, f0 in enumerate(f0List):
-            if(f0 <= 0.0):
-                f0 = self.fixedF0
-            iCenter = int(round(iHop * self.hopSize))
-            offsetRadius = int(np.ceil(self.samprate / (2 * f0)))
-            stdev = self.samprate / (3 * f0)
-
-            windowSize = int(2 * self.samprate / f0 * self.windowLengthFac)
-            if(windowSize % 2 != 0):
-                windowSize += 1
-            window = sp.gaussian(windowSize, stdev)
-            window *= 2 / np.sum(window)
-            maxSpec = np.full(nBin, -np.inf)
-            minBin = np.full(nBin, np.inf)
-            integratedSpec = np.zeros(nBin)
-            for offset in range(-offsetRadius, offsetRadius):
-                frame = getFrame(x, iCenter + offset, windowSize) * window
-                spec = np.abs(np.fft.rfft(frame, n = self.fftSize))
-                need = maxSpec < spec
-                maxSpec[need] = spec[need]
-                need = spec < minBin
-                minBin[need] = spec[need]
-                integratedSpec += spec
-            integratedSpec /= 2 * offsetRadius
-            integratedEnergy = np.sum(integratedSpec ** 2)
-            if(integratedEnergy < 1e-16):
-                out[iHop] = 1e-6
-                continue
-            integratedSpec = np.log(np.clip(integratedSpec, 1e-6, np.inf))
-            smoothedSpec = np.convolve(integratedSpec, kernel)[halfKernelSize:-halfKernelSize]
-            smoothedSpec[:halfKernelSize] = integratedSpec[:halfKernelSize] + (smoothedSpec[:halfKernelSize] - integratedSpec[:halfKernelSize]) * trans
-            smoothedSpec[-halfKernelSize:] = integratedSpec[-halfKernelSize:] + (smoothedSpec[-halfKernelSize:] - integratedSpec[-halfKernelSize:]) * revTrans
-            linearSmoothedSpec = np.exp(smoothedSpec)
-            smoothedSpec = np.log(linearSmoothedSpec * np.sqrt(integratedEnergy / np.sum(linearSmoothedSpec ** 2)))
-            out[iHop] = smoothedSpec
-
+        kernel = sp.firwin(self.filterKernelSize, self.filterCutoff, window="hanning", pass_zero=True).astype(np.float32)
+        trans = (np.arange(halfKernelSize, dtype=np.float32) / (halfKernelSize - 1)) ** self.filterTransExp
+        out = np.zeros((nHop, nBin), dtype=np.float32)
+        if self.useAccelerator:
+            try:
+                from . import accelerator
+                accelerator.mfiCore(x, f0List, kernel, trans, self.fixedF0, self.hopSize, self.samprate, self.windowLengthFac, self.fftSize, out)
+            except Exception as e:
+                print("[ERROR] Failed to call accelerator, fallback: %s" % (str(e),))
+                _mfiCore(x, f0List, kernel, trans, self.fixedF0, self.hopSize, self.samprate, self.windowLengthFac, self.fftSize, out)
+        else:
+            _mfiCore(x, f0List, kernel, trans, self.fixedF0, self.hopSize, self.samprate, self.windowLengthFac, self.fftSize, out)
         return out

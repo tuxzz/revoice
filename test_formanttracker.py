@@ -35,8 +35,8 @@ print("Sinusoid Synthing...")
 synProc = hnm.Synther(sr)
 sinusoid = synProc(hFreqList, hAmpList, hPhaseList, sinusoidEnergyList, None, None, enableNoise = False)
 
-w = sp.resample_poly(w, int(np.round(w.shape[0] / sr * 12000.0)), w.shape[0])
-sinusoid = sp.resample_poly(sinusoid, int(np.round(sinusoid.shape[0] / sr * 12000.0)), sinusoid.shape[0])
+w = sp.resample_poly(w, int(round(w.shape[0] / sr * 12000.0)), w.shape[0]).astype(np.float32)
+sinusoid = sp.resample_poly(sinusoid, int(round(sinusoid.shape[0] / sr * 12000.0)), sinusoid.shape[0]).astype(np.float32)
 lpcSr = 12000.0
 
 print("LPC Analyzing...")
@@ -44,7 +44,7 @@ lpcProc = lpc.Analyzer(lpcSr, order = order)
 coeffList, xmsList = lpcProc(sinusoid, f0List)
 
 lpcSpectrum = np.zeros((nHop, 2049))
-FList, bwList = np.zeros((nHop, int(np.ceil(order * 0.5)))), np.zeros((nHop, int(np.ceil(order * 0.5))))
+FList, bwList = np.zeros((nHop, int(np.ceil(order / 2))), dtype=np.float32), np.zeros((nHop, int(np.ceil(order / 2))), dtype=np.float32)
 for iHop, f0 in enumerate(f0List):
     lpcSpectrum[iHop] = lpc.calcMagnitudeFromLPC(coeffList[iHop], xmsList[iHop], fftSize, lpcSr, deEmphasisFreq = 50.0)
     F, bw = lpc.calcFormantFromLPC(coeffList[iHop], lpcSr)
@@ -58,6 +58,7 @@ bwList = bwList[:, :nMaxFormant]
 print("Formant Tracking...")
 formantTracker = formanttracker.Analyzer(nMaxFormant, lpcSr)
 trackedFList, trackedBwList = formantTracker(hFreqList, hAmpList, FList, bwList)
+assert trackedFList.dtype == trackedBwList.dtype == np.float32
 for iFormant in range(nMaxFormant):
     iHop = 0
     splittedF0List = splitArray(f0List)

@@ -3,7 +3,7 @@ import pylab as pl
 
 @nb.jit()
 def areaToReflection(a: np.ndarray) -> np.ndarray:
-  out = np.zeros(a.shape)
+  out = np.zeros(a.shape, dtype=np.float32)
   for i in range(1, a.shape[0]):
     if a[i] == 0.0:
       out[i] = 0.9999
@@ -14,8 +14,8 @@ def areaToReflection(a: np.ndarray) -> np.ndarray:
 @nb.jit()
 def reflectionToALPCoeff(r: np.ndarray) -> np.ndarray:
   n = r.shape[0] - 1
-  a = np.zeros(n + 1)
-  b = np.zeros(n)
+  a = np.zeros(n + 1, dtype=np.float32)
+  b = np.zeros(n, dtype=np.float32)
   a[0] = -1
   a[1] = r[1]
   for i in range(1, n):
@@ -30,7 +30,7 @@ def reflectionToALPCoeff(r: np.ndarray) -> np.ndarray:
 def applyVoiceTractFilterSingleTractALP(x: np.ndarray, tractAreaList: np.ndarray, glottalReflection: float, lipReflection: float) -> np.ndarray:
   reflection = areaToReflection(tractAreaList)
   f = reflectionToALPCoeff(np.concatenate(([glottalReflection], reflection, [lipReflection])))
-  return sp.lfilter([1.0], f, x)
+  return sp.lfilter([1.0], f, x).astype(np.float32)
 
 @nb.jit()
 def calcVoiceTractSectionCount(vtLen: float, sr: float, c: float = soundVelocity) -> int:
@@ -54,7 +54,7 @@ def calcVoiceTractRadius(posList: np.ndarray, radiusList: np.ndarray, sr: float,
   vtLen = posList[-1]
   nSection = calcVoiceTractSectionCount(vtLen, sr, c)
 
-  return ipl.interp1d(posList, radiusList, kind="linear")(np.linspace(0.0, posList[-1], nSection))
+  return ipl.interp1d(posList, radiusList, kind="linear")(np.linspace(0.0, posList[-1], nSection)).astype(np.float32)
 
 # Equal Length Tube Model
 @nb.jit()
@@ -71,7 +71,7 @@ def applyVoiceTractFilterSingleTractByReflection(x: np.ndarray, reflection: np.n
   R = np.zeros(nSection)
   L = np.zeros(nSection)
 
-  out = np.zeros(x.shape)
+  out = np.zeros(x.shape, dtype=np.float32)
   for i in range(x.shape[0]):
     junctionOutputR[0] = L[0] * glottalReflection + x[i]
     junctionOutputL[nSection] = R[nSection-1] * lipReflection
@@ -112,7 +112,7 @@ def applyVoiceTractFilterTwoTract(x: np.ndarray, mainTractAreaList: np.ndarray, 
   rightReflection = (2 * mainTractAreaList[iNoseStart + 1] - sumArea) / sumArea
   noseJunctionReflection = (2 * velumArea - sumArea) / sumArea
 
-  out = np.zeros(x.shape)
+  out = np.zeros(x.shape, dtype=np.float32)
   for i in range(x.shape[0]):
     # Main Tract
     mainJunctionOutputR[0] = L[0] * glottalReflection + x[i]

@@ -1,7 +1,7 @@
 from .common import *
 from . import cheaptrick, adaptivestft, hnm_qfft, hnm_get, hnm_qhm
 
-@nb.jit(nb.float64[:](nb.float64[:], nb.float64[:], nb.float64[:], nb.float64[:], nb.float64), nopython = True, cache = True)
+@nb.jit(nb.float32[:](nb.float32[:], nb.float32[:], nb.float32[:], nb.float32[:], nb.float32), parallel=True, fastmath=True, nopython=True)
 def synthSinusoid(t, hFreq, hAmp, hPhase, sr):
     # constant
     nOut = t.shape[0]
@@ -16,14 +16,14 @@ def synthSinusoid(t, hFreq, hAmp, hPhase, sr):
     assert hPhase.ndim == 1
 
     # compute
-    out = np.zeros(nOut)
-    for iSin in range(nSin):
+    out = np.zeros(nOut, dtype=np.float32)
+    for iSin in nb.prange(nSin):
         freq = hFreq[iSin]
         amp = hAmp[iSin]
         phase = hPhase[iSin] if(hPhase is not None) else 0.0
-        if(freq <= 0.0 or freq >= nyq):
+        if freq <= 0.0 or freq >= nyq:
             break
-        if(amp <= 0.0):
+        if amp <= 0.0:
             continue
         out[:] += np.cos(2.0 * np.pi * freq * t + phase) * amp
     return out
@@ -37,7 +37,7 @@ def calculateSinusoidSpectrum(hFreq, hAmp, hPhase, nFFT, sr):
     synthRange = np.arange(4096) / sr
     window = np.hanning(4096)
     windowNormFac = 2 / np.sum(window)
-    return np.fft.rfft(synthSinusoid(synthRange, hFreq, hAmp, hPhase, sr)) * windowNormFac
+    return np.fft.rfft(synthSinusoid(synthRange, hFreq, hAmp, hPhase, sr)).astype(np.float32) * windowNormFac
 
 def filterNoise(x, responseList, hopSize):
     olaFac = 2
@@ -45,27 +45,25 @@ def filterNoise(x, responseList, hopSize):
     nHop, responseBin = responseList.shape
 
     windowSize = int(hopSize * windowFac)
-    if(windowSize % 2 == 1):
+    if windowSize % 2 == 1:
         windowSize += 1
     
     nBin = windowSize // 2 + 1
     nX = x.shape[0]
 
-    assert getNFrame(nX, hopSize) == nHop
-
-    window, _ = np.hanning(windowSize), 0.5
+    window = np.hanning(windowSize).astype(np.float32)
     analyzeNormFac = 0.5 * np.sum(window)
     synthNormScale = windowFac // 2 * olaFac
 
     window = np.sqrt(window)
-    buff = np.zeros(nBin, dtype = np.complex128)
-    out = np.zeros(nX)
+    buff = np.zeros(nBin, dtype=np.complex64)
+    out = np.zeros(nX, dtype=np.float32)
     for iFrame in range(nHop * olaFac):
         iHop = iFrame // olaFac
         iCenter = int(round(iFrame * hopSize / olaFac))
         
-        frame = getFrame(x, iCenter, windowSize)
-        if(np.max(frame) == np.min(frame)):
+        frame = removeDCSimple(getFrame(x, iCenter, windowSize))
+        if np.max(frame) == np.min(frame):
             continue
 
         ffted = np.fft.rfft(frame * window)
@@ -102,6 +100,7 @@ class Analyzer:
         nyq = self.samprate / 2
         assert self.samprate > 0
         assert self.mvf > 0 and self.mvf <= nyq
+        assert isinstance(self.fftSize, int)
 
     def __call__(self, x, f0List):
         # early check input
@@ -115,7 +114,7 @@ class Analyzer:
         maxHar = max(0, int(self.mvf / minF0))
 
         synthSize = int(self.hopSize * 2)
-        if(synthSize % 2 == 1):
+        if synthSize % 2 == 1:
             synthSize += 1
         halfSynthSize = synthSize // 2
 
@@ -128,12 +127,13 @@ class Analyzer:
         hFreqList, hAmpList, hPhaseList = harmonicAnalyzer(x, f0List, maxHar)
         hF0List = hFreqList[:, 0]
         hMeanF0 = np.mean(hF0List[hF0List > 0])
+
         del harmonicAnalyzer
 
         # resynth & ola & calculate sinusoid energy
-        sinusoid = np.zeros(nX, dtype = np.float64)
-        sinusoidEnergyList = np.zeros(nHop, dtype = np.float64)
-        olaWindow = np.hanning(synthSize)
+        sinusoid = np.zeros(nX, dtype=np.float32)
+        sinusoidEnergyList = np.zeros(nHop, dtype=np.float32)
+        olaWindow = np.hanning(synthSize).astype(np.float32)
         for iHop, f0 in enumerate(f0List):
             if(f0 <= 0.0):
                 continue
@@ -144,14 +144,14 @@ class Analyzer:
             
             synthLeft = max(energyAnalysisRadius, halfSynthSize)
             synthRight = max(energyAnalysisRadius + 1, halfSynthSize)
-            synthRange = np.arange(-synthLeft, synthRight) / self.samprate
+            synthRange = np.arange(-synthLeft, synthRight, dtype=np.float32) / self.samprate
 
             ob, oe, ib, ie = getFrameRange(nX, iCenter, synthSize)
             synthed = synthSinusoid(synthRange, hFreqList[iHop], hAmpList[iHop], hPhaseList[iHop], self.samprate)
 
             # integrate energy
             energyBegin = synthLeft - energyAnalysisRadius
-            energyAnalysisWindow = np.hanning(energyAnalysisRadius * 2 + 1)
+            energyAnalysisWindow = np.hanning(energyAnalysisRadius * 2 + 1).astype(np.float32)
             energyAnalysisWindowNormFac = 1 / np.mean(energyAnalysisWindow)
             sinusoidEnergyList[iHop] = np.mean((synthed[energyBegin:energyBegin + energyAnalysisRadius * 2 + 1] * energyAnalysisWindow * energyAnalysisWindowNormFac) ** 2)
 
@@ -166,14 +166,14 @@ class Analyzer:
 
         # build noise envelope
         noiseMagnList = np.abs(adaptivestft.Analyzer(self.samprate)(noise, hF0List))
-        noiseEnvList = cheaptrick.Analyzer(self.samprate, fixedF0 = hMeanF0)(noiseMagnList, hF0List)
+        noiseEnvList = cheaptrick.Analyzer(self.samprate, fixedF0=hMeanF0)(noiseMagnList, hF0List)
         del noiseMagnList
 
         # calculate noise energy
-        noiseEnergyList = np.zeros(nHop, dtype = np.float64)
+        noiseEnergyList = np.zeros(nHop, dtype=np.float32)
         for iHop, f0 in enumerate(f0List):
             iCenter = int(round(iHop * self.hopSize))
-            if(f0 > 0.0):
+            if f0 > 0.0:
                 frame = getFrame(noise, iCenter, 4 * int(self.samprate / f0) + 1)
             else:
                 frame = getFrame(noise, iCenter, synthSize)
@@ -198,14 +198,15 @@ class Synther:
         self.maxNoiseEnvHarmonic = kwargs.get("maxNoiseEnvHarmonic", 3)
         self.maxNoiseEnvDCAdjustment = kwargs.get("maxNoiseEnvDCAdjustment", 10.0)
 
-        assert(self.mvf <= self.samprate / 2)
+        assert self.mvf <= self.samprate / 2
+        assert isinstance(self.fftSize, int)
 
     def __call__(self, hFreqList, hAmpList, hPhaseList, sinusoidEnergyList, noiseEnvList, noiseEnergyList, enableSinusoid = True, enableNoise = True):
         # early check input
         assert hFreqList.ndim == 2
         # constant
         nHop, nHar = hFreqList.shape
-        nOut = int(np.ceil(nHop * self.hopSize))
+        nOut = getNSample(nHop, self.hopSize)
         nBin = self.fftSize // 2 + 1
 
         # check input
@@ -221,12 +222,12 @@ class Synther:
         halfSynthSize = synthSize // 2
 
         # synth sinusoid
-        if(enableSinusoid):
-            sinusoid = np.zeros(nOut)
-            synthWindow = np.hanning(synthSize)
+        if enableSinusoid:
+            sinusoid = np.zeros(nOut, dtype=np.float32)
+            synthWindow = np.hanning(synthSize).astype(np.float32)
             for iHop in range(nHop):
                 f0 = hFreqList[iHop, 0]
-                if(f0 <= 0.0 or (sinusoidEnergyList is not None and sinusoidEnergyList[iHop] <= 0.0)):
+                if f0 <= 0.0 or (sinusoidEnergyList is not None and sinusoidEnergyList[iHop] <= 0.0):
                     continue
                 iCenter = int(round(iHop * self.hopSize))
 
@@ -234,8 +235,8 @@ class Synther:
                 hFreq = hFreqList[iHop][need]
                 hAmp = hAmpList[iHop][need]
                 hPhase = hPhaseList[iHop][need]
-                if(sinusoidEnergyList is None):
-                    synthRange = np.arange(-halfSynthSize, halfSynthSize) / self.samprate
+                if sinusoidEnergyList is None:
+                    synthRange = np.arange(-halfSynthSize, halfSynthSize, dtpye=np.float32) / self.samprate
                     synthed = synthSinusoid(synthRange, hFreq, hAmp, hPhase, self.samprate)
                     ob, oe, ib, ie = getFrameRange(nOut, iCenter, synthSize)
                     sinusoid[ib:ie] += synthed[ob:oe] * synthWindow[ob:oe]
@@ -247,8 +248,8 @@ class Synther:
                     
                     synthLeft = max(energyAnalysisRadius, halfSynthSize)
                     synthRight = max(energyAnalysisRadius + 1, halfSynthSize)
-                    synthRange = np.arange(-synthLeft, synthRight) / self.samprate
-                    energyAnalysisWindow = np.hanning(energyAnalysisRadius * 2 + 1)
+                    synthRange = np.arange(-synthLeft, synthRight, dtype=np.float32) / self.samprate
+                    energyAnalysisWindow = np.hanning(energyAnalysisRadius * 2 + 1).astype(np.float32)
                     energyAnalysisWindowNormFac = 1 / np.mean(energyAnalysisWindow)
 
                     synthed = synthSinusoid(synthRange, hFreq, hAmp, hPhase, self.samprate)
@@ -270,15 +271,15 @@ class Synther:
             del synthWindow
         
         # synth noise
-        if(enableNoise):
-            noise = np.zeros(nOut)
-            noiseTemplate = np.random.uniform(-1.0, 1.0, nOut)
+        if enableNoise:
+            noise = np.zeros(nOut, dtype=np.float32)
+            noiseTemplate = np.random.uniform(-1.0, 1.0, nOut).astype(np.float32)
             noiseTemplate = filterNoise(noiseTemplate, noiseEnvList, self.hopSize)
-            synthWindow = np.hanning(synthSize)
+            synthWindow = np.hanning(synthSize).astype(np.float32)
 
             # energy normalize & apply noise energy envelope
             for iHop in range(nHop):
-                if(noiseEnergyList[iHop] <= 0.0):
+                if noiseEnergyList[iHop] <= 0.0:
                     continue
                 iCenter = int(round(iHop * self.hopSize))
 
@@ -286,16 +287,16 @@ class Synther:
                 noiseEnergy = noiseEnergyList[iHop]
 
                 # synth noise energy envelope from harmonic if f0 greater than 0
-                if(sinusoidEnergyList is not None and f0 > 0.0):
+                if sinusoidEnergyList is not None and f0 > 0.0:
                     sinusoidEnergy = sinusoidEnergyList[iHop]
                     
                     energyAnalysisRadius = int(self.samprate / f0 * 2)
-                    if(energyAnalysisRadius % 2 == 1):
+                    if energyAnalysisRadius % 2 == 1:
                         energyAnalysisRadius += 1
                     
                     synthLeft = max(energyAnalysisRadius, halfSynthSize)
                     synthRight = max(energyAnalysisRadius + 1, halfSynthSize)
-                    synthRange = np.arange(-synthLeft, synthRight) / self.samprate
+                    synthRange = np.arange(-synthLeft, synthRight, dtype=np.float32) / self.samprate
 
                     need = hFreqList[iHop] > 0.0
                     nHar = min(np.sum(need), self.maxNoiseEnvHarmonic)
@@ -304,10 +305,10 @@ class Synther:
                     # set as positive
                     synthedNoiseEnergyEnv -= np.min(synthedNoiseEnergyEnv)
                     synthedNoiseEnergyEnvNormFac = np.max(synthedNoiseEnergyEnv)
-                    if(synthedNoiseEnergyEnvNormFac > 0.0):
+                    if synthedNoiseEnergyEnvNormFac > 0.0:
                         synthedNoiseEnergyEnv /= synthedNoiseEnergyEnvNormFac
                     # dc adjustment
-                    if(noiseEnergy > 0.0):
+                    if noiseEnergy > 0.0:
                         snr = sinusoidEnergy / noiseEnergy
                         dc = noiseDCFunction(snr)
                         synthedNoiseEnergyEnv *= 1.0 - dc
@@ -319,30 +320,30 @@ class Synther:
                     
                     # integrate template energy
                     energyAnalysisBegin = synthLeft - energyAnalysisRadius
-                    energyAnalysisWindow = np.hanning(energyAnalysisRadius * 2 + 1)
+                    energyAnalysisWindow = np.hanning(energyAnalysisRadius * 2 + 1).astype(np.float32)
                     energyAnalysisWindowNormFac = 1 / np.mean(energyAnalysisWindow)
                     noiseTemplateEnergy = np.mean((noiseTemplateFrame[energyAnalysisBegin:energyAnalysisBegin + energyAnalysisRadius * 2 + 1] * energyAnalysisWindow * energyAnalysisWindowNormFac) ** 2)
 
                     # set energy and ola
                     olaBegin = synthLeft - halfSynthSize
-                    if(noiseTemplateEnergy > 0.0):
+                    if noiseTemplateEnergy > 0.0:
                         windowedNoiseFrame = noiseTemplateFrame[olaBegin:olaBegin + synthSize] * np.sqrt(noiseEnergy / noiseTemplateEnergy) * synthWindow
                     else:
-                        windowedNoiseFrame = np.zeros(synthSize)
+                        windowedNoiseFrame = np.zeros(synthSize, dtype=np.float32)
                     ob, oe, ib, ie = getFrameRange(nOut, iCenter, synthSize)
                     noise[ib:ie] += windowedNoiseFrame[ob:oe]
                 else:
                     noiseTemplateFrame = getFrame(noiseTemplate, iCenter, synthSize)
                     # integrate template energy
-                    if(noiseEnergyList is not None):
-                        energyAnalysisWindow = np.hanning(synthSize)
+                    if noiseEnergyList is not None:
+                        energyAnalysisWindow = np.hanning(synthSize).astype(np.float32)
                         energyAnalysisWindowNormFac = 1 / np.mean(energyAnalysisWindow)
                         noiseTemplateEnergy = np.mean((noiseTemplateFrame * energyAnalysisWindow * energyAnalysisWindowNormFac) ** 2)
                         # set energy
-                        if(noiseTemplateEnergy > 0.0):
+                        if noiseTemplateEnergy > 0.0:
                             windowedNoiseFrame = noiseTemplateFrame * np.sqrt(noiseEnergy / noiseTemplateEnergy) * synthWindow
                         else:
-                            windowedNoiseFrame = np.zeros(synthSize)
+                            windowedNoiseFrame = np.zeros(synthSize, dtype=np.float32)
                     else:
                         windowedNoiseFrame = noiseTemplateFrame * synthWindow
                     # ola
@@ -350,11 +351,11 @@ class Synther:
                     noise[ib:ie] += windowedNoiseFrame[ob:oe]
         
         # combine and output debug
-        out = np.zeros(nOut)
-        if(enableSinusoid):
+        out = np.zeros(nOut, dtype=np.float32)
+        if enableSinusoid:
             saveWav("debug/rs_sin.wav", sinusoid, self.samprate)
             out += sinusoid
-        if(enableNoise):
+        if enableNoise:
             saveWav("debug/rs_noise.wav", noise, self.samprate)
             out += noise
         saveWav("debug/rs_combine.wav", out, self.samprate)

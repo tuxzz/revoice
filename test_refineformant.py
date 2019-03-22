@@ -88,6 +88,7 @@ FList[need] = np.nan
 
 need = f0List > 0
 iHop = 150
-pl.plot(hFreqList[need][iHop], np.log(hAmpList[need][iHop]))
+need2 = hFreqList[need][iHop] > 0.0
+pl.plot(hFreqList[need][iHop][need2], np.log(hAmpList[need][iHop][need2]))
 pl.plot(rfftFreq(stftAnalyzer.fftSize, sr), np.log(calcKlattFilterBankResponseMagnitude(rfftFreq(stftAnalyzer.fftSize, sr), FList[need][iHop], bwList[need][iHop], ampList[need][iHop], sr)))
 pl.show()

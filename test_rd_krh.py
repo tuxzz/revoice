@@ -24,7 +24,7 @@ hFreqList, hAmpList, hPhaseList, sinusoidEnergyList, noiseEnvList, noiseEnergyLi
 
 print("Rd Analyzing...")
 nHop = f0List.shape[0]
-rdList = np.zeros(nHop)
+rdList = np.zeros(nHop, dtype=np.float32)
 rdAnalyzer = rd_krh.Analyzer()
 for iHop, f0 in enumerate(f0List):
     if(f0 <= 0):

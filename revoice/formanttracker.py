@@ -1,18 +1,18 @@
 from .common import *
 from . import sparsehmm
 
-@nb.jit(nb.float64(nb.float64, nb.float64[:], nb.float64[:]), nopython = True, cache = True)
+@nb.jit(nb.float32(nb.float32, nb.float32[:], nb.float32[:]), nopython = True, cache = True)
 def _calcStateTransProb(octaveTransCost, srcF, targetF):
     if((srcF <= 0.0).any() or (targetF <= 0.0).any()):
         return eps
     return 1 / np.mean(np.exp(octaveTransCost * np.abs(np.log2(srcF / targetF)))) + eps
 
-@nb.jit(nb.float64[:](nb.int32, nb.float64, nb.int32[:], nb.float64[:, :]), nopython = True, cache = True)
+@nb.jit(nb.float32[:](nb.int32, nb.float32, nb.int32[:], nb.float32[:, :]), nopython = True, cache = True)
 def _calcTransProbList(iHop, octaveTransCost, candFrameOffsetList, FList):
     (nHop, _) = FList.shape
     (nState,) = candFrameOffsetList.shape
 
-    stateTransProbList = np.zeros(nState * nState)
+    stateTransProbList = np.zeros(nState * nState, dtype=np.float32)
     for iSource in range(nState):
         sourceFrameOffset = candFrameOffsetList[iSource]
         iSourceHop = iHop + sourceFrameOffset
@@ -45,7 +45,7 @@ class Analyzer:
         minError = np.inf
         for bwFac in np.linspace(0.5, 5.0, 17):
             Famp = ipl.interp1d(np.concatenate(((0,), hFreq)), np.concatenate(((hAmp[0],), hAmp)), kind = "linear", bounds_error = False, fill_value = hAmp[-1])(F)
-            vtAmp = calcKlattFilterBankResponseMagnitude(hFreq, F, np.clip(bw * bwFac, 50.0, 500.0), Famp, self.samprate)
+            vtAmp = calcKlattFilterBankResponseMagnitude(hFreq, F, np.clip(bw * bwFac, 50.0, 500.0), Famp.astype(np.float32), self.samprate)
             if((vtAmp <= 0.0).any()):
                 continue
             err = calcItakuraSaitoDistance(hAmp, vtAmp)
@@ -71,7 +71,7 @@ class Analyzer:
         hFreq = hFreq[need]
         hAmp = hAmp[need]
 
-        obsProbList = np.zeros(nState)
+        obsProbList = np.zeros(nState, dtype=np.float32)
         for iState, frameOffset in enumerate(self.candFrameOffsetList):
             iOffsetHop = frameOffset + iHop
             if(iOffsetHop < 0 or iOffsetHop >= nHop):
@@ -91,20 +91,21 @@ class Analyzer:
         assert nState < 32768
         model = sparsehmm.ViterbiDecoder(nState, nState * nState)
 
-        initStateProb = np.full(nState, 1 / nState)
+        initStateProb = np.full(nState, 1 / nState, dtype=np.float32)
         model.initialize(self.calcStateProb(0, hFreqList[0], hAmpList[0], FList, bwList), initStateProb)
         del initStateProb
 
-        sourceStateList = np.repeat(np.arange(nState), nState)
-        targetStateList = np.tile(np.arange(nState), nState)
+        model.preserve(nHop - 1)
+        sourceStateList = np.repeat(np.arange(nState, dtype=np.int32), nState)
+        targetStateList = np.tile(np.arange(nState, dtype=np.int32), nState)
         for iHop in range(1, nHop):
             print(iHop, nHop)
             stateTransProbList = _calcTransProbList(iHop, self.octaveTransCost, self.candFrameOffsetList, FList)
             model.feed(self.calcStateProb(iHop, hFreqList[iHop], hAmpList[iHop], FList, bwList), sourceStateList, targetStateList, stateTransProbList)
         
         trackedStateList = model.readDecodedPath()
-        trackedFList = np.zeros((nHop, nTrack))
-        trackedBwList = np.zeros((nHop, nTrack))
+        trackedFList = np.zeros((nHop, nTrack), dtype=np.float32)
+        trackedBwList = np.zeros((nHop, nTrack), dtype=np.float32)
 
         for iHop, iState in enumerate(trackedStateList):
             frameOffset = self.candFrameOffsetList[iState]

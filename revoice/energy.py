@@ -10,7 +10,7 @@ class Analyzer:
         nX = x.shape[0]
         nHop = getNFrame(nX, self.hopSize)
 
-        out = np.zeros(nHop)
+        out = np.zeros(nHop, dtype=np.float32)
         frameSize = int(2 * self.hopSize)
         if(frameSize % 2 == 1):
             frameSize += 1

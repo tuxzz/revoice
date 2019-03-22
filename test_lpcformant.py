@@ -5,7 +5,7 @@ from revoice.common import *
 import scipy.fftpack as sfft
 
 w, sr = loadWav("voices/yuri_orig.wav")
-w = sp.resample_poly(w, int(np.round(w.shape[0] / sr * 12000.0)), w.shape[0])
+w = sp.resample_poly(w, int(np.round(w.shape[0] / sr * 12000.0)), w.shape[0]).astype(np.float32)
 sr = 12000.0
 
 w = applyPreEmphasisFilter(w, 50.0, sr)
@@ -29,12 +29,14 @@ f0List[silentList] = -np.abs(f0List[silentList])
 print("LPC Analyzing...")
 lpcProc = lpc.Analyzer(sr, order = order)
 coeffList, xmsList = lpcProc(w, f0List)
+assert coeffList.dtype == xmsList.dtype == np.float32
 
-lpcSpectrum = np.zeros((nHop, 2049))
-FList, bwList = np.zeros((nHop, int(np.ceil(order * 0.5)))), np.zeros((nHop, int(np.ceil(order * 0.5))))
+lpcSpectrum = np.zeros((nHop, 2049), dtype=np.float32)
+FList, bwList = np.zeros((nHop, int(np.ceil(order / 2))), dtype=np.float32), np.zeros((nHop, int(np.ceil(order / 2))), dtype=np.float32)
 for iHop, f0 in enumerate(f0List):
     lpcSpectrum[iHop] = lpc.calcMagnitudeFromLPC(coeffList[iHop], xmsList[iHop], fftSize, sr, deEmphasisFreq = 50.0)
     F, bw = lpc.calcFormantFromLPC(coeffList[iHop], sr)
+    assert F.dtype == bw.dtype == np.float32
     need = np.logical_and(F > 50.0, F < sr * 0.5)
     F, bw = F[need], bw[need]
     FList[iHop, :F.shape[0]], bwList[iHop, :F.shape[0]] = F, bw

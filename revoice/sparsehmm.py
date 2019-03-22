@@ -2,19 +2,19 @@ import sys
 import numpy as np
 from .common import *
 
-@nb.jit(nb.types.Tuple((nb.float64[:], nb.int32[:]))(nb.float64[:], nb.float64[:], nb.int32[:], nb.int32[:], nb.float64[:]), nopython = True, cache = True)
+@nb.jit(fastmath=True, nopython = True, cache = True)
 def hmmViterbiForwardCore(obs, oldDelta, sourceState, targetState, stateTransProb):
     nTrans = stateTransProb.shape[0]
     nState = oldDelta.shape[0]
     assert obs.shape == oldDelta.shape
     
-    delta = np.zeros(nState, dtype = np.float64)
-    psi = np.zeros(nState, dtype = np.int32)
+    delta = np.zeros(nState, dtype=np.float32)
+    psi = np.zeros(nState, dtype=np.int32)
     currValue = oldDelta[sourceState] * stateTransProb
 
     for iTrans in range(nTrans):
         ts = targetState[iTrans]
-        if(currValue[iTrans] > delta[ts]):
+        if currValue[iTrans] > delta[ts]:
             delta[ts] = currValue[iTrans] # will be multiplied by the right obs later
             psi[ts] = sourceState[iTrans]
     delta *= obs
@@ -28,6 +28,7 @@ class ViterbiDecoder:
 
         self.oldDelta = None
         self.psi = None # without first frame
+        self.usedPsi = None
     
     def initialize(self, firstObsProb, initStateProb):
         nState = self.nState
@@ -41,7 +42,11 @@ class ViterbiDecoder:
             oldDelta /= deltaSum
         
         self.oldDelta = oldDelta
-        self.psi = np.zeros((0, nState), dtype = np.int)
+        self.psi = np.zeros((0, nState), dtype = np.int32)
+        self.usedPsi = 0
+    
+    def preserve(self, nFrame):
+        self.psi = np.concatenate((self.psi, np.zeros((nFrame, self.nState), dtype = np.int32)))
     
     def feed(self, obsStateProbList, sourceState, targetState, stateTransProb):
         nState, nTrans = self.nState, self.nTrans
@@ -55,7 +60,9 @@ class ViterbiDecoder:
         assert stateTransProb.shape == (nTrans,)
 
         nFrame = obsStateProbList.shape[0]
-        psi = np.zeros((nFrame, nState), dtype = np.int)
+        if self.usedPsi + nFrame > self.psi.shape[0]:
+            self.psi = np.resize(self.psi, (self.usedPsi + nFrame + 16, nState))
+        psi = self.psi[self.usedPsi:self.usedPsi + nFrame]
         oldDelta = self.oldDelta
         # rest of forward step
         for iFrame in range(nFrame):
@@ -70,7 +77,7 @@ class ViterbiDecoder:
                 oldDelta.fill(1.0 / nState)
                 #scale[iFrame] = 1.0
         self.oldDelta = oldDelta
-        self.psi = np.concatenate((self.psi, psi))
+        self.usedPsi += nFrame
     
     def finalize(self):
         self.oldDelta = None
@@ -78,13 +85,13 @@ class ViterbiDecoder:
 
     def readDecodedPath(self):
         oldDelta = self.oldDelta
-        nFrame = self.psi.shape[0] + 1
-        psi = self.psi
+        nFrame = self.usedPsi + 1
+        psi = self.psi[:self.usedPsi]
 
         # init backward step
         bestStateIdx = np.argmax(oldDelta)
 
-        path = np.ndarray(nFrame, dtype = np.int) # the final output path
+        path = np.ndarray(nFrame, dtype=np.int32) # the final output path
         path[-1] = bestStateIdx
 
         # rest of backward step

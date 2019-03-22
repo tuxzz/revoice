@@ -1,5 +1,4 @@
 from .common import *
-from . import instantfrequency
 
 def calcError(F, bw, amp, hFreq, hAmp, sr):
     vtAmp = calcKlattFilterBankResponseMagnitude(hFreq, F, bw, amp, sr)

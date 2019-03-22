@@ -6,11 +6,11 @@ def hmToSinusoid(fkHat, ak):
     K = len(ak)
     nHar = (K - 1) // 2
 
-    hAmp = np.zeros(nHar, dtype = np.float64)
-    hPhase = np.zeros(nHar, dtype = np.float64)
-    hFreq = fkHat[nHar + 1:].reshape(nHar)
-    hAmp = np.abs(ak[nHar + 1:].reshape(nHar)) * 2.0
-    hPhase = np.unwrap(np.angle(ak[nHar + 1:]).reshape(nHar))
+    hAmp = np.zeros(nHar, dtype=np.float32)
+    hPhase = np.zeros(nHar, dtype=np.float32)
+    hFreq = fkHat[nHar + 1:].reshape(nHar).astype(np.float32)
+    hAmp = np.abs(ak[nHar + 1:].reshape(nHar), dtype=np.float32) * 2.0
+    hPhase = np.unwrap(np.angle(ak[nHar + 1:]).reshape(nHar)).astype(np.float32)
 
     return hFreq, hAmp, hPhase
 
@@ -52,8 +52,6 @@ class Slover:
         self.windowedX = x.reshape(nX, 1) * self.windowArray
 
     def iterate(self):
-        (nX,) = self.x.shape
-
         t = np.dot(2 * np.pi * self.fkHat, self.n) / self.samprate # arg of cplx exp
         E = np.cos(t) + 1j * np.sin(t) # mat with cplx exp, [2N + 1 * K] dim
         E = np.concatenate((E, np.tile(self.n, (self.K, 1)) * E), axis = 0) # (2K, 2N + 1)
@@ -91,26 +89,26 @@ class Analyzer:
         assert (nHop,) == f0List.shape
 
         synthSize = int(self.hopSize * 2)
-        if(synthSize % 2 == 1):
+        if synthSize % 2 == 1:
             synthSize += 1
         halfSynthSize = synthSize // 2
 
         f0List = f0List.copy()
-        synthRange = np.arange(-halfSynthSize, halfSynthSize) / self.samprate
+        synthRange = np.arange(-halfSynthSize, halfSynthSize, dtype=np.float32) / self.samprate
         synthWindow = np.hanning(synthSize)
         nVoiced = np.sum(f0List > 0.0)
 
         # AIR
-        if(self.maxAIRIter > 0):
+        if self.maxAIRIter > 0:
             srerSum = 0.0
             for iHop, f0 in enumerate(f0List):
-                if(f0 <= 0.0):
+                if f0 <= 0.0:
                     continue
                 iCenter = int(round(iHop * self.hopSize))
                 comparisonFrame = getFrame(x, iCenter, synthSize) * synthWindow
 
                 analyzeWindowSize = int(self.samprate / f0 * 4.0)
-                if(analyzeWindowSize % 2 == 0):
+                if analyzeWindowSize % 2 == 0:
                     analyzeWindowSize += 1
                 analyzeFrame = getFrame(x, iCenter, analyzeWindowSize)
                 nHar = min(int(self.mvf / f0), maxHar)
@@ -136,30 +134,29 @@ class Analyzer:
                     hFreq, hAmp, hPhase = hmToSinusoid(self.slover.fkHat, self.slover.ak)
                     synthed = hnm.synthSinusoid(synthRange, hFreq, hAmp, hPhase, self.samprate) * synthWindow
                     srer = calcSRER(comparisonFrame, synthed)
-                    if(srer - lastSRER > 0.0):
+                    if srer - lastSRER > 0.0:
                         lastF0 = f0
                         lastSRER = srer
-                    if(srer - lastSRER < self.airSRERThreshold):
+                    if srer - lastSRER < self.airSRERThreshold:
                         break
                 f0List[iHop] = lastF0
                 srerSum += lastSRER
         print("AIR Average SRER:", srerSum / nVoiced)
 
         # QHM
-        minF0 = np.min(f0List[f0List > 0.0])
         srerSum = 0.0
-        hFreqList = np.zeros((nHop, maxHar), dtype = np.float64)
-        hAmpList = np.zeros((nHop, maxHar), dtype = np.float64)
-        hPhaseList = np.zeros((nHop, maxHar), dtype = np.float64)
+        hFreqList = np.zeros((nHop, maxHar), dtype=np.float32)
+        hAmpList = np.zeros((nHop, maxHar), dtype=np.float32)
+        hPhaseList = np.zeros((nHop, maxHar), dtype=np.float32)
 
         for iHop, f0 in enumerate(f0List):
-            if(f0 <= 0.0):
+            if f0 <= 0.0:
                 continue
             iCenter = int(round(iHop * self.hopSize))
 
             comparisonFrame = getFrame(x, iCenter, synthSize) * synthWindow
             analyzeWindowSize = int(self.samprate / f0 * 4.0)
-            if(analyzeWindowSize % 2 == 0):
+            if analyzeWindowSize % 2 == 0:
                 analyzeWindowSize += 1
             analyzeFrame = getFrame(x, iCenter, analyzeWindowSize)
             nHar = min(int(self.mvf / f0), maxHar)

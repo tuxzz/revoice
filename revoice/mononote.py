@@ -54,10 +54,10 @@ class Analyzer:
                 if(distance > minTransBin or distance == 0):
                     nTrans += 1
 
-        init = np.zeros(nState, dtype = np.float64)
-        frm = np.zeros(nTrans, dtype = np.int)
-        to = np.zeros(nTrans, dtype = np.int)
-        transProb = np.zeros(nTrans, dtype = np.float64)
+        init = np.zeros(nState, dtype = np.float32)
+        frm = np.zeros(nTrans, dtype = np.int32)
+        to = np.zeros(nTrans, dtype = np.int32)
+        transProb = np.zeros(nTrans, dtype = np.float32)
 
         init[np.arange(2, nState, step = 3)] = 1.0 / nBin # only start from silent state
 
@@ -108,12 +108,18 @@ class Analyzer:
 
     def calcStateProb(self, obsProb, meanEnergy):
         obsProb = np.asarray(obsProb)
+        nObsProb = np.where(obsProb.T[0] <= 0.0)[0]
+        if nObsProb.shape[0] > 0:
+            nObsProb = nObsProb[0]
+        else:
+            nObsProb = obsProb.shape[0]
+        obsProb = obsProb[:nObsProb]
         nState = self.model.nState
         assert(obsProb.ndim == 2)
         assert(obsProb.shape[1] == 2)
 
         nBin = int(self.nSemitone * self.binPerSemitone)
-        out = np.zeros(nState, dtype = np.float64)
+        out = np.zeros(nState, dtype = np.float32)
 
         probPitched = np.sum(obsProb.T[1]) * (1.0 - self.priorWeight) + self.priorPitchedProb * self.priorWeight
         pitches = freqToPitch(obsProb.T[0])
