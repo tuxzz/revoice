@@ -1,0 +1,5 @@
+model_checkpoint_path: "hubble_vuv-1025"
+all_model_checkpoint_paths: "hubble_vuv-257"
+all_model_checkpoint_paths: "hubble_vuv-513"
+all_model_checkpoint_paths: "hubble_vuv-769"
+all_model_checkpoint_paths: "hubble_vuv-1025"
