@@ -6,25 +6,10 @@ from revoice.common import *
 w, sr = loadWav("voices/yuri_orig.wav")
 energyList = energy.Analyzer(sr)(w)
 
-print("F0 Estimation...")
-pyinAnalyzer = pyin.Analyzer(sr)
-obsProbList = pyinAnalyzer(w)
-monopitchAnalyzer = monopitch.Analyzer(*monopitch.parameterFromPYin(pyinAnalyzer))
-f0List = monopitchAnalyzer(obsProbList)
-silentList = energyList < 1e-8
-f0List[silentList] = -np.abs(f0List[silentList])
-hopSize = pyinAnalyzer.hopSize
-nHop = f0List.shape[0]
-
-# fix vuv flag before we have better vuv detector
-# fix for voices/yuri_orig.wav
-f0List[int(0.19 * sr / pyinAnalyzer.hopSize):int(0.354 * sr / pyinAnalyzer.hopSize) + 1] = np.abs(f0List[int(0.19 * sr / pyinAnalyzer.hopSize):int(0.354 * sr / pyinAnalyzer.hopSize) + 1])
-f0List[int(2.669 * sr / pyinAnalyzer.hopSize):int(2.689 * sr / pyinAnalyzer.hopSize) + 1] = np.abs(f0List[int(2.669 * sr / pyinAnalyzer.hopSize):int(2.689 * sr / pyinAnalyzer.hopSize) + 1])
-f0List[int(2.814 * sr / pyinAnalyzer.hopSize):int(2.86 * sr / pyinAnalyzer.hopSize) + 1] = np.abs(f0List[int(2.814 * sr / pyinAnalyzer.hopSize):int(2.86 * sr / pyinAnalyzer.hopSize) + 1])
-
-print("F0 Refinement...")
-f0RefineProcessor = refinef0_stft.Processor(sr)
-f0List = f0RefineProcessor(w, f0List)
+print("F0 Detecting...")
+hubbleAnalyzer = hubble.Analyzer(sr)
+hopSize = hubbleAnalyzer.hopSize
+f0List = hubbleAnalyzer(w)
 
 print("HNM Analyzing...")
 hnmAnalyzer = hnm.Analyzer(sr, harmonicAnalysisMethod = "get")

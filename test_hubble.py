@@ -5,7 +5,7 @@ from revoice.common import *
 
 b, a = dc_iir_filter(50.0 / hubble.workSr / 2)
 
-w, sr = loadWav("voices/yuri_orig.wav")
+w, sr = loadWav("voices/yuki_01.wav")
 pw = sp.resample_poly(w, hubble.workSr, sr).astype(np.float32)
 pw = sp.filtfilt(b, a, pw).astype(np.float32)
 

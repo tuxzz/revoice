@@ -22,6 +22,8 @@ assert _b0.shape == (128,)
 assert _k1.shape == (128, _n_band + 1)
 assert _b1.shape == (_n_band + 1,)
 
+_b, _a = dc_iir_filter(50.0 / workSr / 2.0)
+
 @nb.njit(fastmath=True, cache=True)
 def _gen_if(x, out, i_freq, h1, hd1, h2, hd2, hop_size, n_hop):
   (nh,) = h1.shape
@@ -83,7 +85,7 @@ def _snr(relFreq, x, iCenter):
   return yang.calcYangSNRSingleFrame(frame, relFreq, w)
 
 #@nb.njit(fastmath=True)
-def refine(x, freqList, hopSize, maxIter=16, maxMove=10.0):
+def refine(x, freqList, hopSize):
   (nHop,) = freqList.shape
   out = np.zeros(nHop, dtype=np.float32)
   for (iHop, f) in enumerate(freqList):
@@ -115,6 +117,7 @@ def freqToBin(freq):
 class Tracker:
   def __init__(self, **kwargs):
     self.hopSize = kwargs.get("hopSize", workSr * 0.0025)
+    self.vBias = kwargs.get("vBias", 1.0)
     self.model, self.initStateProb, self.sourceState, self.targetState, self.stateTransProb = self.createModel()
 
   def createModel(self):
@@ -137,14 +140,21 @@ class Tracker:
     trans_prob[n_band * n_state + n_band] = trans_self
 
     return sparsehmm.ViterbiDecoder(n_state, n_trans), init, frm, to, trans_prob
+  
+  def calcStateProb(self, obsProb):
+    p = obsProb.copy()
+    p[:64] *= self.vBias
+    return p / np.sum(p)
 
   def __call__(self, obsProbList):
-    (_n_hop, n_band) = obsProbList.shape
+    (n_hop, n_band) = obsProbList.shape
     assert n_band == 65, "Bad shape"
 
     # feed & decode
-    self.model.initialize(obsProbList[0], self.initStateProb)
-    self.model.feed(obsProbList[1:], self.sourceState, self.targetState, self.stateTransProb)
+    self.model.initialize(self.calcStateProb(obsProbList[0]), self.initStateProb)
+    self.model.preserve(n_hop - 1)
+    for i_hop in range(1, n_hop):
+      self.model.feed(self.calcStateProb(obsProbList[i_hop]), self.sourceState, self.targetState, self.stateTransProb)
     path = self.model.readDecodedPath()
     self.model.finalize()
     return path
@@ -182,3 +192,21 @@ class F0Tracker:
     path = self.model.readDecodedPath()
     self.model.finalize()
     return path
+
+class Analyzer:
+  def __init__(self, sr, **kwargs):
+      self.samprate = float(sr)
+      self.hopSize = kwargs.get("hopSize", self.samprate * 0.0025)
+      self.vBias = kwargs.get("vBias", 1.0)
+      self.energyThreshold = kwargs.get("energyThreshold", 1e-8)
+
+  def __call__(self, x):
+    hopSize = self.hopSize / self.samprate * workSr
+
+    x = sp.resample_poly(x, workSr, self.samprate)
+    x = sp.filtfilt(_b, _a, x).astype(np.float32)
+
+    f0List = binToFreq(Tracker(hopSize=hopSize, vBias=self.vBias)(generateMap(x, hopSize)))
+    if self.energyThreshold > 0.0:
+      f0List[energy.Analyzer(workSr)(x) < self.energyThreshold] = 0.0
+    return refine(x, f0List, hopSize)
