@@ -19,6 +19,10 @@ windowDict = {
     "blackmanharris": (sp.blackmanharris, 2.0044, (35875 - 3504 * np.pi) / 1e5),
 }
 
+def loadWavRaw(path):
+    sr, w = wavfile.read(path, mmap=True)
+    return w, sr
+
 def loadWav(path):
     """
     Load wave file into float64 ndarray
