@@ -1007,3 +1007,88 @@ def accurateHann(width, offsetWidth, fftSize):
     if offsetWidth != 0.0:
         fd *= np.exp(-2j * offsetWidth * np.pi * f)
     return np.fft.irfft(fd) * width
+
+def stft(x, window, hop_size, fft_size, remove_dc=True):
+    (window_size,) = window.shape
+    (n_x,) = x.shape
+    n_hop = getNFrame(n_x, hop_size)
+    n_bin = fft_size // 2 + 1
+
+    assert isinstance(hop_size, int)
+    assert window_size <= fft_size
+    assert window_size % 2 == 0
+    assert hop_size > 0
+    assert fft_size > 0 and roundUpToPowerOf2(fft_size) == fft_size
+
+    window_norm_fac = 2.0 / np.sum(window)
+    window = window * window_norm_fac
+    del window_norm_fac
+
+    out = np.zeros((n_hop, n_bin), dtype=np.complex64)
+    for i_hop in range(n_hop):
+      i_center = int(round(i_hop * hop_size))
+      frame = getFrame(x, i_center, window_size)
+      if remove_dc:
+        frame = removeDCSimple(frame)
+      frame *= window
+      out[i_hop] = np.fft.rfft(frame, n=fft_size)
+    return out
+
+def istft_window(window, hop_size):
+    window_size = window.size
+    window *= 2.0 / np.sum(window)
+    window_2 = window * window
+
+    w = np.zeros(window.shape, dtype=np.float32)
+    for i in range(-window_size // 2, window_size + window_size // 2 + 1, hop_size):
+        ob, oe, ib, ie = getFrameRange(window_size, i, window_size)
+        w[ib:ie] += window_2[ob:oe]
+
+    return window / w
+
+def istft(x, window, hop_size, n_out):
+    (window_size,) = window.shape
+    (n_hop, n_bin,) = x.shape
+    fft_size = (n_bin - 1) * 2
+    
+    assert isinstance(hop_size, int)
+    assert window_size <= fft_size
+    assert window_size % 2 == 0
+    assert hop_size > 0
+    assert fft_size > 0 and roundUpToPowerOf2(fft_size) == fft_size
+
+    window = window
+    out = np.zeros(n_out, dtype=np.float32)
+    for i_hop in range(n_hop):
+        i_center = i_hop * hop_size
+        synthed = np.fft.irfft(x[i_hop])
+        synthed = synthed[:window_size]
+        synthed *= window
+        ob, oe, ib, ie = getFrameRange(n_out, i_center, window_size)
+        out[ib:ie] += synthed[ob:oe]
+    return out
+
+hanning_coeff = np.array([0.5, 0.5], dtype=np.float32)
+hamming_coeff = np.array([0.53836, 0.46164], dtype=np.float32)
+nuttall83_coeff = np.array([0.338946, 0.481973, 0.161054, 0.018027], dtype=np.float32)
+nuttall98_coeff = np.array([0.3635819, 0.4891775, 0.1365995, 0.0106411], dtype=np.float32)
+nuttall_min3_coeff = np.array([0.4243801, 0.4973406, 0.0782793], dtype=np.float32)
+nuttall_min4_coeff = np.array([0.35875, 0.48829, 0.14128, 0.01168], dtype=np.float32)
+blackman_ex_coeff = np.array([7938 / 18608, 9240 / 18608, 1430 / 18608], dtype=np.float32)
+def nuttall(M, coeff, sym):
+    if M < 1:
+        return np.array([], dtype=np.float32)
+    if M == 1:
+        return np.ones(1, dtype=np.float32)
+    odd = bool(M % 2)
+    if not sym and not odd:
+        M = M + 1
+    n = np.arange(0, M)
+    sign_list = [-1.0, 1.0]
+    w = coeff[0]
+    for (i, x) in enumerate(coeff[1:]):
+        sign = sign_list[i % 2]
+        w += sign * x * np.cos((i + 1) * 2.0 * np.pi * n / (M - 1))
+    if not sym and not odd:
+        w = w[:-1]
+    return w
