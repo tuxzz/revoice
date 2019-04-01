@@ -13,10 +13,10 @@ b, a = dc_iir_filter(50.0 / sr / 2.0)
 w = sp.filtfilt(b, a, w).astype(np.float32)
 
 window = nuttall(2048, nuttall_min3_coeff, sym=False)
-hop_size = 128
+hop_size = list_stft_hop_size(window)[-1]
 assert sp.check_COLA(window, window.size, window.size - hop_size)
 assert sp.check_NOLA(window, window.size, window.size - hop_size)
-spec = stft(w, window, hop_size, 4096)
+spec = stft(w, window, hop_size, 4096, remove_dc=True)
 reconstruct_w = istft(spec, istft_window(window, hop_size), hop_size, w.shape[0])
 
 pl.figure()

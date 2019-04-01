@@ -1092,3 +1092,12 @@ def nuttall(M, coeff, sym):
     if not sym and not odd:
         w = w[:-1]
     return w
+
+def list_stft_hop_size(window):
+    (window_size,) = window.shape
+    assert window_size > 0
+    l = []
+    for i in range(1, window_size):
+        if sp.check_COLA(window, window_size, window_size - i) and sp.check_NOLA(window, window_size, window_size - i):
+            l.append(i)
+    return l
