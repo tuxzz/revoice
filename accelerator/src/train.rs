@@ -2,7 +2,7 @@ use super::common::*;
 
 use fftw::types::Flag;
 use fftw::plan::{R2CPlan, R2CPlan32};
-use num_traits::*;
+//use num_traits::*;
 use num_complex::*;
 use rayon::prelude::*;
 use rand::prelude::*;
