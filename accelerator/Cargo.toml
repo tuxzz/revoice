@@ -23,7 +23,7 @@ features = ["extension-module"]
 [dependencies.fftw]
 version = "0.5"
 default-features = false
-features = ["system"]
+features = ["source"]
 
 [profile.release]
 opt-level = 3
